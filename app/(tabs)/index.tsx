@@ -1,98 +1,205 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, Button, TextInput, FlatList, KeyboardAvoidingView, Platform } from 'react-native';
+import YoutubePlayer from 'react-native-youtube-iframe';
+import io from 'socket.io-client';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+// Connected directly to your live Render cloud server
+const socket = io('https://watch-party-backend-wzj6.onrender.com');
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [playing, setPlaying] = useState(false);
+  const [videoId, setVideoId] = useState("dQw4w9WgXcQ");
+  const [videoInput, setVideoInput] = useState("");
+  
+  // Chat States
+  const [messages, setMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  
+  // Ref to prevent infinite sync loops
+  const isRemoteUpdate = useRef(false);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  useEffect(() => {
+    // Listen for incoming video sync commands
+    socket.on('sync-video', (data) => {
+      isRemoteUpdate.current = true;
+      if (data.type === 'playState') {
+        setPlaying(data.playing);
+      } else if (data.type === 'videoChange') {
+        setVideoId(data.videoId);
+      }
+    });
+
+    // Listen for incoming chat messages
+    socket.on('chat-message', (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    return () => {
+      socket.off('sync-video');
+      socket.off('chat-message');
+    };
+  }, []);
+
+  const onStateChange = useCallback((state) => {
+    if (state === "ended") {
+      setPlaying(false);
+    }
+  }, []);
+
+  const togglePlaying = () => {
+    const nextState = !playing;
+    setPlaying(nextState);
+    
+    // Only broadcast if the user physically pressed the button
+    if (!isRemoteUpdate.current) {
+      socket.emit('video-command', { type: 'playState', playing: nextState });
+    }
+    isRemoteUpdate.current = false;
+  };
+
+  const handleLoadVideo = () => {
+    if (videoInput.trim() !== "") {
+      setVideoId(videoInput);
+      socket.emit('video-command', { type: 'videoChange', videoId: videoInput });
+      setVideoInput("");
+    }
+  };
+
+  const sendMessage = () => {
+    if (chatInput.trim() !== "") {
+      // Create a unique ID for the message using the current timestamp
+      const newMsg = { id: Date.now().toString(), text: chatInput };
+      socket.emit('chat-message', newMsg);
+      setChatInput("");
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <Text style={styles.title}>Watch Party Room</Text>
+      
+      <YoutubePlayer 
+        height={250} 
+        play={playing} 
+        videoId={videoId} 
+        onChangeState={onStateChange} 
+      />
+
+      <View style={styles.controlsContainer}>
+        <Button 
+          title={playing ? "⏸ Pause Video" : "▶️ Play Video"} 
+          onPress={togglePlaying} 
+          color="#d9534f" 
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <TextInput 
+          style={styles.input} 
+          placeholder="Paste Video ID..." 
+          value={videoInput} 
+          onChangeText={setVideoInput} 
+        />
+        <Button title="Load" onPress={handleLoadVideo} />
+      </View>
+
+      {/* Chat Interface */}
+      <View style={styles.chatSection}>
+        <Text style={styles.chatHeader}>Live Chat</Text>
+        
+        <FlatList
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <Text style={styles.chatMessage}>💬 {item.text}</Text>}
+          style={styles.chatList}
+        />
+        
+        <View style={styles.chatInputContainer}>
+          <TextInput 
+            style={styles.chatInputText} 
+            placeholder="Type a message..." 
+            value={chatInput} 
+            onChangeText={setChatInput} 
+          />
+          <Button title="Send" onPress={sendMessage} color="#5cb85c" />
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: { 
+    flex: 1, 
+    backgroundColor: '#f5f5f5', 
+    paddingTop: 40 
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  title: { 
+    fontSize: 24, 
+    fontWeight: 'bold', 
+    textAlign: 'center', 
+    marginBottom: 10 
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  controlsContainer: { 
+    marginVertical: 5, 
+    paddingHorizontal: 50 
   },
+  inputContainer: { 
+    flexDirection: 'row', 
+    paddingHorizontal: 20, 
+    marginBottom: 10 
+  },
+  input: { 
+    flex: 1, 
+    height: 40, 
+    borderColor: 'gray', 
+    borderWidth: 1, 
+    marginRight: 10, 
+    paddingHorizontal: 10, 
+    backgroundColor: 'white' 
+  },
+  
+  // Chat Styles
+  chatSection: { 
+    flex: 1, 
+    borderTopWidth: 1, 
+    borderColor: '#ddd', 
+    backgroundColor: '#fff', 
+    paddingTop: 10 
+  },
+  chatHeader: { 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    paddingHorizontal: 20, 
+    marginBottom: 5 
+  },
+  chatList: { 
+    flex: 1, 
+    paddingHorizontal: 20 
+  },
+  chatMessage: { 
+    fontSize: 16, 
+    marginVertical: 4, 
+    padding: 8, 
+    backgroundColor: '#f1f1f1', 
+    borderRadius: 8 
+  },
+  chatInputContainer: { 
+    flexDirection: 'row', 
+    padding: 10, 
+    borderTopWidth: 1, 
+    borderColor: '#ddd' 
+  },
+  chatInputText: { 
+    flex: 1, 
+    height: 40, 
+    borderColor: 'gray', 
+    borderWidth: 1, 
+    marginRight: 10, 
+    paddingHorizontal: 10, 
+    borderRadius: 20 
+  }
 });
