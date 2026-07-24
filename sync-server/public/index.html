@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
 <title>SyncTube Professional</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<!-- Google Material Symbols (Zero Emojis) -->
+<!-- Google Material Symbols (Professional Icons, Zero Emojis) -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" />
 <style>
   :root {
@@ -51,7 +51,7 @@
   .mini-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; font-family: 'Montserrat', sans-serif; color: #05070a; flex-shrink: 0; position: relative; box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3px rgba(255,255,255,0.06); }
   .host-crown { position: absolute; top: -7px; right: -7px; font-size: 14px; color: var(--warning); display: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.6)); background: var(--bg-elevated); border-radius: 50%; padding: 2px; }
 
-  /* ---------------- MX PLAYER STYLE OVERLAY CONTAINER ---------------- */
+  /* ---------------- VIDEO PLAYER & MX OVERLAY ---------------- */
   .video-container { width: 100%; aspect-ratio: 16/9; background: #000; flex-shrink: 0; position: relative; border-bottom: 1px solid var(--border); max-height: 250px; overflow: hidden; }
   iframe { width: 100%; height: 100%; border: none; position: absolute; top: 0; left: 0; pointer-events: none; }
   #html5Player { width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: #000; display: none; }
@@ -62,7 +62,6 @@
   .player-placeholder .ph-title { font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 13px; color: var(--text-dim); letter-spacing: 0.5px; margin-top: 8px; }
   .player-placeholder .ph-sub { font-size: 11px; color: var(--text-faint); }
 
-  /* Overlay Control Panel */
   .player-ui { position: absolute; inset: 0; z-index: 10; display: none; flex-direction: column; justify-content: space-between; background: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 30%, rgba(0,0,0,0.2) 70%, rgba(0,0,0,0.85) 100%); opacity: 1; transition: opacity 0.3s ease; }
   .player-ui.show { display: flex; }
   .player-ui.hidden { opacity: 0; pointer-events: none; }
@@ -89,13 +88,12 @@
   .action-group { display: flex; align-items: center; gap: 14px; }
   .vol-slider { width: 65px; height: 4px; -webkit-appearance: none; background: rgba(255,255,255,0.3); border-radius: 2px; accent-color: var(--accent); }
 
-  /* Touch Lock Logic */
   .touch-lock-layer { position: absolute; inset: 0; z-index: 15; display: none; align-items: flex-end; justify-content: flex-end; padding: 16px; background: rgba(0,0,0,0.1); }
   .video-container.locked .touch-lock-layer { display: flex; pointer-events: auto; }
   .unlock-btn { background: rgba(10,12,17,0.75); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 10px 16px; border-radius: 30px; font-size: 12px; font-weight: 700; font-family: 'Montserrat', sans-serif; display: flex; align-items: center; gap: 8px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
   .touch-lock-layer.wake .unlock-btn { opacity: 1; pointer-events: auto; }
 
-  /* ---------------- UI STYLING ---------------- */
+  /* ---------------- TABS & UI ---------------- */
   .tab-container { flex: 1; overflow-y: auto; background: var(--bg); padding: 14px; padding-bottom: 78px; }
   .tab { display: none; flex-direction: column; height: 100%; }
   .tab.active { display: flex; animation: fadeIn 0.18s ease-out; }
@@ -104,6 +102,9 @@
   h3 { font-family: 'Montserrat', sans-serif; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.3px; margin-bottom: 9px; font-weight: 700; }
   input[type="text"] { flex: 1; background: var(--panel); border: 1px solid var(--panel-border); padding: 12px 15px; border-radius: var(--radius-sm); color: #fff; font-size: 13px; outline: none; transition: border-color 0.15s, box-shadow 0.15s; width: 100%; }
   input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  input[type="text"].input-error { border-color: var(--danger); }
+  .field-error { color: var(--danger); font-size: 10px; font-weight: 600; margin: -4px 0 8px 2px; display: none; }
+  .field-error.show { display: block; }
   .input-group { display: flex; gap: 8px; margin-bottom: 14px; flex-shrink: 0; }
   .input-hint { font-size: 10px; color: var(--text-faint); margin: -8px 0 14px 2px; }
 
@@ -119,6 +120,12 @@
   .segmented button { flex: 1; background: transparent; border: none; color: var(--text-dim); font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 10px; text-transform: uppercase; padding: 9px 0; border-radius: 9px; cursor: pointer; transition: all 0.15s; }
   .segmented button.active { background: var(--accent); color: #041014; box-shadow: var(--shadow-md); }
 
+  .active-rooms-box { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; max-height: 130px; overflow-y: auto; }
+  .active-room-row { display: flex; justify-content: space-between; align-items: center; background: var(--bg-elevated); padding: 10px 13px; border-radius: var(--radius-sm); margin-bottom: 7px; border: 1px solid var(--panel-border); font-size: 12px; cursor: pointer; }
+  .active-room-row:active { border-color: var(--accent); }
+  .room-id-tag { font-family: 'Montserrat', sans-serif; font-weight: 700; color: var(--accent); }
+  .room-count-tag { font-size: 10px; color: var(--text-dim); background: var(--panel); padding: 3px 9px; border-radius: 10px; display: flex; align-items: center; gap: 4px; }
+
   .chip-row { display: flex; gap: 8px; overflow-x: auto; margin: 14px 0 18px 0; padding-bottom: 4px; scrollbar-width: none; flex-shrink: 0; }
   .chip-row::-webkit-scrollbar { display: none; }
   .chip { flex-shrink: 0; background: var(--panel); border: 1px solid var(--panel-border); color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 9px 15px; border-radius: 20px; cursor: pointer; font-family: 'Montserrat', sans-serif; transition: all 0.15s; }
@@ -130,9 +137,17 @@
   .media-info { display: flex; flex-direction: column; justify-content: center; overflow: hidden; gap: 2px; }
   .media-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
   .media-sub { font-size: 10px; color: var(--text-dim); }
-  
+
+  .skeleton-card { display: flex; gap: 11px; margin-bottom: 9px; background: var(--panel); padding: 9px; border-radius: var(--radius-sm); border: 1px solid var(--panel-border); }
+  .skeleton-thumb { width: 92px; height: 52px; border-radius: 8px; flex-shrink: 0; background: var(--panel-border); animation: pulse 1.3s infinite ease-in-out; }
+  .skeleton-lines { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 7px; }
+  .skeleton-line { height: 8px; border-radius: 4px; background: var(--panel-border); width: 80%; animation: pulse 1.3s infinite ease-in-out; }
+  .skeleton-line.short { width: 40%; }
+  @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
   .load-more-btn { width: 100%; padding: 11px; margin-top: 4px; background: var(--panel); border: 1px dashed var(--panel-border); color: var(--text-dim); border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; cursor: pointer; font-family: 'Montserrat', sans-serif; }
 
+  /* ---------------- VOICE & CHAT ---------------- */
   .voice-panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 12px 13px; margin-bottom: 14px; }
   .voice-panel-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
   .voice-controls { display: flex; gap: 6px; align-items: center; }
@@ -140,11 +155,15 @@
   .voice-toggle-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--panel-border); background: var(--bg-elevated); color: var(--text-dim); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
   .voice-toggle-btn.on { background: linear-gradient(120deg, var(--accent), #00b8d4); color: #041014; border-color: transparent; box-shadow: 0 0 16px rgba(0,229,255,0.25); }
   .voice-toggle-btn.muted { background: rgba(255,77,94,0.15); color: var(--danger); border-color: rgba(255,77,94,0.4); }
-  
+  .voice-toggle-btn.connecting { opacity: 0.6; cursor: wait; }
+
   .voice-participants { display: flex; flex-wrap: wrap; gap: 7px; }
   .voice-chip { display: flex; align-items: center; gap: 6px; background: var(--bg-elevated); border: 1px solid var(--panel-border); border-radius: 18px; padding: 5px 10px 5px 5px; font-size: 10px; color: var(--text-dim); }
   .voice-chip.speaking { border-color: var(--success); box-shadow: 0 0 0 2px rgba(38,217,122,0.15); }
   .voice-chip .mini-avatar { width: 20px; height: 20px; font-size: 8px; }
+  .speak-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--panel-border); }
+  .voice-chip.speaking .speak-dot { background: var(--success); box-shadow: 0 0 5px var(--success); }
+  .voice-empty { font-size: 10px; color: var(--text-faint); }
 
   .chat-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
   .members-btn { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); padding: 8px 13px; border-radius: 20px; font-size: 11px; font-weight: 700; font-family: 'Montserrat', sans-serif; }
@@ -155,12 +174,21 @@
   .chat-user { color: var(--accent); font-weight: 700; font-size: 11px; }
   .chat-time { font-size: 9px; color: var(--text-faint); margin-left: 6px; font-weight: 500; }
   .chat-sys { text-align: center; color: var(--text-faint); font-size: 9px; font-weight: 600; margin: 7px 0; letter-spacing: 0.8px; text-transform: uppercase; }
+  .chat-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .typing-indicator { font-size: 10px; color: var(--text-dim); font-style: italic; padding: 0 4px 7px 4px; height: 14px; }
 
+  .setting-tile { background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 11px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .setting-label { font-size: 10px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 3px; }
+  .setting-val { font-size: 14px; font-weight: 700; color: var(--text); font-family: 'Montserrat', sans-serif; }
+  .copy-btn { background: var(--accent-glow); border: 1px solid rgba(0,229,255,0.4); color: var(--accent); padding: 6px 11px; border-radius: 7px; font-size: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; flex-shrink: 0; }
+
+  /* ---------------- BOTTOM NAV & MODALS ---------------- */
   .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; display: flex; justify-content: space-around; background: linear-gradient(0deg, var(--bg-elevated), var(--bg)); border-top: 1px solid var(--border); padding: 9px 0; padding-bottom: max(9px, env(safe-area-inset-bottom)); z-index: 20; }
   .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-faint); font-size: 8px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.8px; width: 25%; font-family: 'Montserrat', sans-serif; background: none; border: none; transition: color 0.15s; }
   .nav-item.active { color: var(--accent); }
   .nav-item.active::after { content: ''; width: 16px; height: 2px; background: var(--accent); border-radius: 2px; margin-top: 2px; box-shadow: 0 0 6px var(--accent); }
   .nav-icon { font-size: 20px; margin-bottom: 2px; }
+  .unread-badge { position: absolute; top: 2px; right: 28%; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid var(--bg-elevated); display: none; }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(4,5,8,0.75); backdrop-filter: blur(6px); z-index: 90; display: none; align-items: flex-end; justify-content: center; }
   .modal-overlay.show { display: flex; }
@@ -198,13 +226,22 @@
       <button id="modeJoinBtn" onclick="setLoginMode('join')" type="button">Join Room</button>
     </div>
 
-    <input type="text" id="nameInput" placeholder="Display name" maxlength="20" style="margin-bottom: 14px;">
+    <input type="text" id="nameInput" placeholder="Display name" maxlength="20" style="margin-bottom: 4px;">
+    <div class="field-error" id="nameError">Enter a display name to continue.</div>
 
     <div id="joinRoomField" style="display:none;">
-      <input type="text" id="roomInput" placeholder="Room code (e.g. 7F3K2Q)" maxlength="12" style="text-transform: uppercase;">
+      <input type="text" id="roomInput" placeholder="Room code (e.g. 7F3K2Q)" maxlength="12" style="margin-bottom: 4px; text-transform: uppercase;">
+      <div class="field-error" id="roomError">Enter the room code.</div>
     </div>
 
-    <button class="btn btn-block" id="enterBtn" onclick="joinApp()" style="margin-top: 14px;">Create Room</button>
+    <button class="btn btn-block" id="enterBtn" onclick="joinApp()" style="margin-top: 10px;">Create Room</button>
+
+    <div class="active-rooms-box">
+      <h3>Active Public Rooms</h3>
+      <div id="activeRoomsList">
+        <div style="font-size: 11px; color: var(--text-dim); text-align: center; padding: 10px;">Scanning for active rooms...</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -218,7 +255,7 @@
   </div>
 </div>
 
-<!-- ================= VIDEO PLAYER AREA (MX PLAYER STYLE) ================= -->
+<!-- ================= VIDEO PLAYER AREA ================= -->
 <div class="video-container" id="videoContainer">
   <div id="player"></div>
   <video id="html5Player" playsinline></video>
@@ -363,13 +400,29 @@
   </div>
 </div>
 
-<!-- Members Modal -->
+<!-- Members & Voice Modal -->
 <div class="modal-overlay" id="membersModal" onclick="if(event.target===this) closeMembersModal()">
   <div class="modal-panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h3 style="margin:0; font-size:14px; color:#fff;">Room Members</h3>
       <button class="btn-icon" onclick="closeMembersModal()"><span class="material-symbols-rounded">close</span></button>
     </div>
+
+    <div class="voice-panel">
+      <div class="voice-panel-top">
+        <h3 style="margin-bottom:0;">Voice Chat</h3>
+        <div class="voice-controls">
+          <span class="voice-status-text" id="voiceStatusText"></span>
+          <button class="voice-toggle-btn" id="voiceJoinBtn" onclick="toggleVoice()" title="Join voice"><span class="material-symbols-rounded">mic</span></button>
+          <button class="voice-toggle-btn" id="voiceMuteBtn" onclick="toggleMute()" title="Mute" style="display:none;"><span class="material-symbols-rounded" id="micIcon">volume_up</span></button>
+        </div>
+      </div>
+      <div class="voice-participants" id="voiceParticipants">
+        <span class="voice-empty">No one is in voice chat yet</span>
+      </div>
+    </div>
+
+    <h3>Everyone Here</h3>
     <div id="membersList"></div>
   </div>
 </div>
@@ -395,20 +448,66 @@
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
 <script>
   const YT_API_KEY = "AIzaSyDRWvwOTQOxlEHemge7s8g3e6YWZim0c88";
+  const AVATAR_PALETTE = ["#00e5ff", "#26d97a", "#ffb020", "#ff6b81", "#a29bfe", "#54a0ff", "#ff7f50", "#7bed9f"];
+  
   let socket, player;
   let username = localStorage.getItem('st_user') || "";
   let roomId = localStorage.getItem('st_room') || "";
   let isHost = false;
   let activeSourceType = 'none';
   let html5El = document.getElementById('html5Player');
-  let pendingDirectLink = null;
-  let uiTimeout;
   
+  let currentCategory = '10';
+  let browseMode = 'trending';
+  let nextTrendingToken = null;
+  let nextSearchToken = null;
+  let lastSearchQuery = null;
+  let videoRegistry = {};
+  let cachedQueueData = [];
+  let pendingDirectLink = null;
+  let loginMode = 'create';
+  
+  let typingTimer = null;
+  let typingUsers = new Set();
+
+  let voiceActive = false;
+  let voiceConnecting = false;
+  let voiceMuted = false;
+  let mediaStream = null;
+  let voiceRecordTimer = null;
+  let voiceParticipantsMap = {};
+  let speakingResetTimers = {};
+  let voicePlaybackQueues = {};
+  let voicePlayingNow = {};
+
+  // UI Controls logic
+  let uiTimeout;
   const playerUi = document.getElementById('playerUi');
   const videoContainer = document.getElementById('videoContainer');
   const lockLayer = document.getElementById('touchLockLayer');
 
-  // Auto-hide overlay controls (MX Player / VLC style)
+  const tempSocket = io();
+  tempSocket.on('active-rooms', (rooms) => renderActiveRoomsList(rooms));
+
+  function renderActiveRoomsList(rooms) {
+    const container = document.getElementById('activeRoomsList');
+    if (!rooms || rooms.length === 0) {
+      container.innerHTML = `<div style="font-size: 11px; color: var(--text-dim); text-align: center; padding: 8px;">No active rooms found. Create one!</div>`;
+      return;
+    }
+    container.innerHTML = rooms.map(r => `
+      <div class="active-room-row" onclick="quickJoinRoom('${r.roomId}')">
+        <span class="room-id-tag">ROOM: ${r.roomId}</span>
+        <span class="room-count-tag"><span class="material-symbols-rounded" style="font-size:12px;">group</span> ${r.count} online</span>
+      </div>
+    `).join('');
+  }
+
+  function quickJoinRoom(code) {
+    document.getElementById('roomInput').value = code;
+    setLoginMode('join');
+  }
+
   function wakeUi() {
       if(videoContainer.classList.contains('locked')) {
           lockLayer.classList.add('wake');
@@ -444,6 +543,11 @@
     document.getElementById('tab-' + tabId).classList.add('active');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     el.classList.add('active');
+    if (tabId === 'chat') {
+      document.getElementById('chatBadge').style.display = 'none';
+      const box = document.getElementById('chatBox');
+      box.scrollTop = box.scrollHeight;
+    }
   }
 
   function toast(message, type = 'default') {
@@ -460,6 +564,34 @@
     }, 2400);
   }
 
+  function avatarColor(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+  }
+  function initials(name) {
+    return (name || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  }
+  function paintAvatar(el, name) {
+    el.style.background = avatarColor(name);
+    el.textContent = initials(name);
+  }
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.innerText = str;
+    return d.innerHTML;
+  }
+  function formatChatMessage(str) {
+    const safeStr = document.createElement('div');
+    safeStr.textContent = str;
+    let html = safeStr.innerHTML;
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return html.replace(urlRegex, (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-link">${url}</a>`);
+  }
+  function formatTime(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
   function toggleTheater() { document.body.classList.toggle('theater-mode'); }
   function toggleFullscreen() {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -472,9 +604,11 @@
 
   if (username) document.getElementById('nameInput').value = username;
   function setLoginMode(mode) {
+    loginMode = mode;
     document.getElementById('modeCreateBtn').classList.toggle('active', mode === 'create');
     document.getElementById('modeJoinBtn').classList.toggle('active', mode === 'join');
     document.getElementById('joinRoomField').style.display = mode === 'join' ? 'block' : 'none';
+    document.getElementById('enterBtn').textContent = mode === 'create' ? 'Create Room' : 'Join Room';
   }
 
   function joinApp() {
@@ -482,7 +616,7 @@
     if (!nameVal) return;
     username = nameVal;
     
-    if (document.getElementById('joinRoomField').style.display === 'block') {
+    if (loginMode === 'join') {
       roomId = document.getElementById('roomInput').value.trim().toUpperCase();
       if(!roomId) return;
     } else {
@@ -492,15 +626,29 @@
 
     localStorage.setItem('st_user', username);
     localStorage.setItem('st_room', roomId);
+    tempSocket.disconnect();
 
     document.getElementById('loginModal').classList.remove('show');
     document.getElementById('roomIdDisplay').innerText = roomId;
     document.getElementById('displayNameDisplay').innerText = username;
+    paintAvatar(document.getElementById('settingsAvatar'), username);
+    const topAvatar = document.getElementById('topAvatar');
+    paintAvatar(topAvatar, username);
+    topAvatar.style.display = 'flex';
     
     initSocket();
     loadYouTubeApi();
     initProControls();
+    fetchTrending(currentCategory);
     wakeUi();
+    toast('Joined room: ' + roomId, 'success');
+  }
+
+  function leaveRoom() {
+    localStorage.removeItem('st_user');
+    localStorage.removeItem('st_room');
+    stopVoice();
+    location.reload();
   }
 
   function initSocket() {
@@ -511,8 +659,19 @@
       document.getElementById('userCount').innerText = data.count;
       isHost = data.isAdmin;
       document.getElementById('hostCrownTop').style.display = isHost ? 'block' : 'none';
+      document.getElementById('hostCrownSettings').style.display = isHost ? 'block' : 'none';
       document.getElementById('clearQueueBtn').style.display = isHost ? 'block' : 'none';
       if(data.queue) renderQueue(data.queue);
+    });
+
+    socket.on('members-update', (list) => {
+        document.getElementById('membersList').innerHTML = list.map(m => `
+          <div class="member-row">
+            <div class="mini-avatar" style="background:${avatarColor(m.username)};">${initials(m.username)}</div>
+            <div class="member-name">${escapeHtml(m.username)} ${m.isHost ? '<span class="material-symbols-rounded" style="color:var(--warning);font-size:14px;">stars</span>' : ''}</div>
+            ${(isHost && m.id !== socket.id) ? `<button class="btn btn-ghost btn-sm" onclick="socket.emit('transfer-host',{roomId:'${roomId}',targetId:'${m.id}'})">Make Host</button>` : ''}
+          </div>
+        `).join('');
     });
 
     socket.on('initial-sync', (data) => {
@@ -529,13 +688,82 @@
     });
 
     socket.on('queue-update', renderQueue);
+    
     socket.on('chat-message', (msg) => {
        const box = document.getElementById('chatBox');
-       if(msg.type==='system') box.insertAdjacentHTML('beforeend', `<div class="chat-sys">${escapeHtml(msg.text)}</div>`);
-       else box.insertAdjacentHTML('beforeend', `<div class="chat-msg"><div class="bubble"><span class="chat-user">${escapeHtml(msg.user)}</span><br>${escapeHtml(msg.text)}</div></div>`);
-       box.scrollTop = box.scrollHeight;
+       const ts = msg.timestamp || Date.now();
+       const isAtBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 40;
+
+       if(msg.type==='system') {
+           box.insertAdjacentHTML('beforeend', `<div class="chat-sys">${escapeHtml(msg.text)}</div>`);
+       } else {
+           const color = avatarColor(msg.user);
+           box.insertAdjacentHTML('beforeend', `
+             <div class="chat-msg">
+               <div class="mini-avatar" style="background:${color}; width:24px; height:24px; font-size:9px;">${initials(msg.user)}</div>
+               <div class="bubble">
+                 <div><span class="chat-user">${escapeHtml(msg.user)}</span> <span class="chat-time">${formatTime(ts)}</span></div>
+                 <div style="margin-top:2px;">${formatChatMessage(msg.text)}</div>
+               </div>
+             </div>
+           `);
+       }
+       const isChatActive = document.getElementById('tab-chat').classList.contains('active');
+       if (!isChatActive) document.getElementById('chatBadge').style.display = 'block';
+       if (isAtBottom || !isChatActive) box.scrollTop = box.scrollHeight;
+    });
+
+    socket.on('typing', (data) => {
+      if (data.isTyping) typingUsers.add(data.user); else typingUsers.delete(data.user);
+      renderTypingIndicator();
+    });
+
+    socket.on('voice-participants', (list) => {
+      const next = {};
+      list.forEach(u => { next[u] = voiceParticipantsMap[u] || false; });
+      Object.keys(voiceParticipantsMap).forEach(u => { if (!(u in next)) cleanupVoiceUser(u); });
+      voiceParticipantsMap = next;
+      renderVoiceParticipants();
+    });
+
+    socket.on('voice-speaking', (data) => {
+      if (data.user in voiceParticipantsMap) {
+        voiceParticipantsMap[data.user] = data.speaking;
+        renderVoiceParticipants();
+      }
+    });
+
+    socket.on('voice-chunk', (data) => {
+      if (data.user === username) return;
+      enqueueVoiceClip(data.user, data.data);
+      markSpeaking(data.user);
     });
   }
+
+  document.getElementById('chatInput').addEventListener('input', () => {
+    if (!socket) return;
+    socket.emit('typing', { roomId, user: username, isTyping: true });
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => socket.emit('typing', { roomId, user: username, isTyping: false }), 1500);
+  });
+
+  function renderTypingIndicator() {
+    const el = document.getElementById('typingIndicator');
+    if (typingUsers.size === 0) { el.innerText = ''; return; }
+    const names = Array.from(typingUsers).join(', ');
+    el.innerText = `${names} ${typingUsers.size > 1 ? 'are' : 'is'} typing...`;
+  }
+
+  function sendMsg() {
+    const inputField = document.getElementById('chatInput');
+    const text = inputField.value.trim();
+    if (text && socket) {
+      socket.emit('chat-message', { roomId, user: username, text });
+      socket.emit('typing', { roomId, user: username, isTyping: false });
+      inputField.value = '';
+    }
+  }
+  document.getElementById('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMsg(); });
 
   function loadYouTubeApi() {
     const tag = document.createElement('script');
@@ -551,7 +779,7 @@
       document.getElementById('playerPlaceholder').style.display = 'none';
       document.getElementById('player').style.display = 'block';
       html5El.style.display = 'none';
-      document.getElementById('playerTitle').innerText = 'YouTube Video';
+      document.getElementById('playerTitle').innerText = videoRegistry[id]?.title || 'YouTube Video';
       if(player && player.loadVideoById) player.loadVideoById(id, time);
   }
 
@@ -610,10 +838,18 @@
 
   function onVolumeChange(val) {
       html5El.volume = val/100;
+      document.getElementById('volIcon').innerText = val == 0 ? 'volume_off' : 'volume_up';
   }
 
-  // Universal Search & Direct Link Modal Trigger
-  function handleUniversalSearch() {
+  function toggleMute() {
+      if (html5El) {
+          html5El.muted = !html5El.muted;
+          document.getElementById('volIcon').innerText = html5El.muted ? 'volume_off' : 'volume_up';
+      }
+  }
+
+  // Universal Search & Modal Logic
+  async function handleUniversalSearch() {
       const input = document.getElementById('searchInput').value.trim();
       if(!input) return;
 
@@ -624,14 +860,21 @@
           return;
       }
 
-      // Trigger Conversion Modal for direct links
       if(/^https?:\/\//i.test(input) && !input.includes('youtube.com')) {
           pendingDirectLink = input;
           document.getElementById('convertModal').classList.add('show');
           document.getElementById('searchInput').value = '';
           return;
       }
+      
+      browseMode = 'search';
+      lastSearchQuery = input;
+      nextSearchToken = null;
+      document.getElementById('searchHeading').innerText = 'Searching...';
+      showSkeletons();
+      await runSearch(input, null, false);
   }
+  document.getElementById('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleUniversalSearch(); });
 
   function closeConvertModal() { document.getElementById('convertModal').classList.remove('show'); }
 
@@ -642,7 +885,7 @@
 
   function convertAndPlay() {
       closeConvertModal();
-      toast('Converting video for multi-audio...', 'info');
+      toast('Sending to conversion server...', 'info');
       fetch('/api/convert-from-url', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -665,21 +908,269 @@
       } else toast('Added to queue', 'success');
   }
 
+  function selectVideoById(key) {
+      const item = videoRegistry[key];
+      if (item) selectVideo(item);
+  }
+
+  function clearQueue() {
+      if(!isHost) return;
+      socket.emit('clear-queue', roomId);
+      cachedQueueData = [];
+      renderQueue(cachedQueueData);
+      toast('Queue cleared');
+  }
+
   function renderQueue(q) {
-      const html = q.map(i => `
-         <div class="media-card">
-            <div class="media-thumb" style="display:flex;align-items:center;justify-content:center;background:#1a1e29;">
-              <span class="material-symbols-rounded" style="font-size:24px;color:#8b93a7;">${i.type==='youtube'?'play_circle':'link'}</span>
-            </div>
-            <div class="media-info"><div class="media-title">${escapeHtml(i.title)}</div></div>
-         </div>
-      `).join('');
+      cachedQueueData = q;
+      const html = q.map(i => {
+         const key = i.id || i.url;
+         videoRegistry[key] = i;
+         const thumb = i.thumb || '';
+         return `
+           <div class="media-card" onclick="selectVideoById('${key}')">
+              ${thumb ? `<img class="media-thumb" src="${thumb}" loading="lazy">` : `<div class="media-thumb" style="display:flex;align-items:center;justify-content:center;background:#1a1e29;"><span class="material-symbols-rounded" style="font-size:24px;color:#8b93a7;">link</span></div>`}
+              <div class="media-info">
+                <div class="media-title">${escapeHtml(i.title)}</div>
+                <div class="media-sub">${escapeHtml(i.channel || 'Direct Link')}</div>
+              </div>
+           </div>
+         `;
+      }).join('');
       document.getElementById('queueList').innerHTML = html || '<div class="empty-state">Queue is empty</div>';
+  }
+
+  function selectCategory(cat, el) {
+    document.querySelectorAll('#categoryChips .chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    currentCategory = cat;
+    browseMode = 'trending';
+    fetchTrending(cat);
+  }
+
+  function showSkeletons(count = 3) {
+    let html = '';
+    for (let i = 0; i < count; i++) {
+      html += `<div class="skeleton-card">
+        <div class="skeleton-thumb"></div>
+        <div class="skeleton-lines"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+      </div>`;
+    }
+    document.getElementById('searchResultsContainer').innerHTML = html;
+    document.getElementById('loadMoreBtn').style.display = 'none';
+  }
+
+  async function runSearch(query, pageToken, append) {
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=10&q=${encodeURIComponent(query)}&type=video${pageToken ? '&pageToken=' + pageToken : ''}&key=${YT_API_KEY}`;
+    try {
+      const response = await fetch(searchUrl);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      nextSearchToken = data.nextPageToken || null;
+      renderVideoList(data.items, 'Results for "' + query + '"', append);
+      updateLoadMoreVisibility();
+    } catch (error) {
+      document.getElementById('searchHeading').innerText = 'Search failed.';
+      toast('Could not reach YouTube', 'error');
+    }
+  }
+
+  async function fetchTrending(categoryId, pageToken, append) {
+    if (!append) showSkeletons();
+    const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&maxResults=10&videoCategoryId=${categoryId}${pageToken ? '&pageToken=' + pageToken : ''}&key=${YT_API_KEY}`;
+    try {
+      const response = await fetch(trendingUrl);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+      nextTrendingToken = data.nextPageToken || null;
+      renderVideoList(data.items, 'Trending Now', append);
+      updateLoadMoreVisibility();
+    } catch (error) {
+      document.getElementById('searchHeading').innerText = 'Could not load trending.';
+      toast('Could not reach YouTube', 'error');
+    }
+  }
+
+  function updateLoadMoreVisibility() {
+    const token = browseMode === 'search' ? nextSearchToken : nextTrendingToken;
+    const btn = document.getElementById('loadMoreBtn');
+    btn.style.display = token ? 'block' : 'none';
+    btn.disabled = false;
+    btn.textContent = 'Load more videos';
+  }
+
+  function loadMore() {
+    const btn = document.getElementById('loadMoreBtn');
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    if (browseMode === 'search' && nextSearchToken) runSearch(lastSearchQuery, nextSearchToken, true);
+    else if (browseMode === 'trending' && nextTrendingToken) fetchTrending(currentCategory, nextTrendingToken, true);
+  }
+
+  function renderVideoList(items, headingText, append) {
+    if (items && items.length > 0) {
+      let html = '';
+      items.forEach(item => {
+        const vidId = item.id.videoId || item.id;
+        const title = item.snippet.title;
+        const channel = item.snippet.channelTitle;
+        const thumb = item.snippet.thumbnails.medium.url;
+        videoRegistry[vidId] = { id: vidId, title, channel, thumb, type: 'youtube' };
+        html += `
+        <div class="media-card" onclick="selectVideoById('${vidId}')">
+          <img class="media-thumb" src="${thumb}" loading="lazy">
+          <div class="media-info">
+            <div class="media-title">${escapeHtml(title)}</div>
+            <div class="media-sub">${escapeHtml(channel)}</div>
+          </div>
+        </div>`;
+      });
+      const container = document.getElementById('searchResultsContainer');
+      if (append) container.insertAdjacentHTML('beforeend', html); else container.innerHTML = html;
+      document.getElementById('searchHeading').innerText = headingText;
+    } else if (!append) {
+      document.getElementById('searchResultsContainer').innerHTML = `<div class="empty-state">No media found</div>`;
+      document.getElementById('searchHeading').innerText = 'No results';
+    }
+  }
+
+  // Voice Chat Logic
+  function voiceSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+
+  async function toggleVoice() {
+    if (voiceActive) { stopVoice(); return; }
+    if (voiceConnecting) return;
+    if (!voiceSupported()) { toast('Voice chat not supported', 'error'); return; }
+
+    voiceConnecting = true;
+    const joinBtn = document.getElementById('voiceJoinBtn');
+    joinBtn.classList.add('connecting');
+    document.getElementById('voiceStatusText').textContent = 'Connecting…';
+
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (err) {
+      voiceConnecting = false;
+      joinBtn.classList.remove('connecting');
+      document.getElementById('voiceStatusText').textContent = '';
+      toast('Mic access denied', 'error');
+      return;
+    }
+
+    voiceConnecting = false;
+    voiceActive = true;
+    voiceMuted = false;
+    joinBtn.classList.remove('connecting');
+    joinBtn.classList.add('on');
+    document.getElementById('voiceMuteBtn').style.display = 'flex';
+    document.getElementById('voiceStatusText').textContent = '';
+
+    socket.emit('voice-join', { roomId, user: username });
+    voiceParticipantsMap[username] = false;
+    renderVoiceParticipants();
+    startVoiceCapture();
+    toast('Voice chat connected', 'success');
+  }
+
+  function startVoiceCapture() {
+    let mimeType = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm';
+
+    const recordOneClip = () => {
+      if (!voiceActive || !mediaStream) return;
+      const recorder = new MediaRecorder(mediaStream, { mimeType, audioBitsPerSecond: 32000 });
+      const chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        if (!voiceMuted && chunks.length && socket) {
+          const blob = new Blob(chunks, { type: mimeType });
+          const reader = new FileReader();
+          reader.onloadend = () => socket.emit('voice-chunk', { roomId, user: username, data: reader.result });
+          reader.readAsDataURL(blob);
+        }
+        if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 0);
+      };
+      recorder.start();
+      setTimeout(() => { if (recorder.state !== 'inactive') recorder.stop(); }, 500);
+    };
+    recordOneClip();
+  }
+
+  function toggleMicMute() {
+    voiceMuted = !voiceMuted;
+    const btn = document.getElementById('voiceMuteBtn');
+    btn.classList.toggle('muted', voiceMuted);
+    document.getElementById('micIcon').innerText = voiceMuted ? 'mic_off' : 'mic';
+    if (mediaStream) mediaStream.getAudioTracks().forEach(t => t.enabled = !voiceMuted);
+  }
+
+  function stopVoice() {
+    if (!voiceActive) return;
+    voiceActive = false;
+    clearTimeout(voiceRecordTimer);
+    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+
+    const joinBtn = document.getElementById('voiceJoinBtn');
+    joinBtn.classList.remove('on', 'connecting');
+    document.getElementById('voiceMuteBtn').style.display = 'none';
+    document.getElementById('voiceStatusText').textContent = '';
+
+    if (socket) socket.emit('voice-leave', { roomId, user: username });
+    delete voiceParticipantsMap[username];
+    renderVoiceParticipants();
+    toast('Left voice chat');
+  }
+
+  function markSpeaking(user) {
+    if (!(user in voiceParticipantsMap)) return;
+    voiceParticipantsMap[user] = true;
+    renderVoiceParticipants();
+    clearTimeout(speakingResetTimers[user]);
+    speakingResetTimers[user] = setTimeout(() => {
+      voiceParticipantsMap[user] = false;
+      renderVoiceParticipants();
+    }, 600);
+  }
+
+  function enqueueVoiceClip(user, dataUrl) {
+    if (!voicePlaybackQueues[user]) voicePlaybackQueues[user] = [];
+    const queue = voicePlaybackQueues[user];
+    queue.push(dataUrl);
+    while (queue.length > 4) queue.shift();
+    drainVoiceQueue(user);
+  }
+
+  function drainVoiceQueue(user) {
+    if (voicePlayingNow[user]) return;
+    const queue = voicePlaybackQueues[user];
+    if (!queue || queue.length === 0) return;
+    voicePlayingNow[user] = true;
+    const clipUrl = queue.shift();
+    const audio = new Audio(clipUrl);
+    const advance = () => { voicePlayingNow[user] = false; drainVoiceQueue(user); };
+    audio.onended = advance;
+    audio.onerror = advance;
+    audio.play().catch(advance);
+  }
+
+  function renderVoiceParticipants() {
+    const el = document.getElementById('voiceParticipants');
+    const names = Object.keys(voiceParticipantsMap);
+    if (names.length === 0) { el.innerHTML = `<span class="voice-empty">No one is in voice chat yet</span>`; return; }
+    el.innerHTML = names.map(name => {
+      const speaking = voiceParticipantsMap[name];
+      return `<div class="voice-chip ${speaking ? 'speaking' : ''}">
+        <div class="mini-avatar" style="background:${avatarColor(name)};">${initials(name)}</div>
+        ${escapeHtml(name)}
+        <div class="speak-dot"></div>
+      </div>`;
+    }).join('');
   }
 
   function openMembersModal() { document.getElementById('membersModal').classList.add('show'); }
   function closeMembersModal() { document.getElementById('membersModal').classList.remove('show'); }
-  function escapeHtml(str) { const d=document.createElement('div'); d.innerText=str; return d.innerHTML; }
+  function copyRoomId() { navigator.clipboard.writeText(roomId).then(() => toast('Room code copied', 'success')); }
 </script>
 </body>
 </html>
