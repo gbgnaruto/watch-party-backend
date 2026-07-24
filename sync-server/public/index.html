@@ -488,8 +488,11 @@
   const VOICE_MAX_QUEUED_CLIPS = 4;
   const REMOTE_ECHO_SUPPRESS_MS = 900;
   const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
+  const YT_API_READY_TIMEOUT_MS = 8000;
 
   let player;
+  let ytApiReady = false;
+  let ytApiTimeoutHandle = null;
   let remoteUpdateSuppressedUntil = 0;
   let username = localStorage.getItem('st_user') || "";
   let roomId = localStorage.getItem('st_room') || "";
@@ -659,7 +662,7 @@
     setLoginMode('join');
   }
 
-  // FIX 2: STRICT TOAST DEBOUNCE - Checks for matching text on screen so it can't duplicate
+  // STRICT TOAST DEBOUNCE - Checks for matching text on screen so it can't duplicate
   function toast(message, type = 'default') {
     const host = document.getElementById('toastHost');
     
@@ -716,6 +719,15 @@
       const box = document.getElementById('chatBox');
       box.scrollTop = box.scrollHeight;
     }
+  }
+
+  // Switches to the given tab programmatically (used after actions like adding to queue)
+  function switchTabProgrammatic(tabId) {
+    const navBtn = Array.from(document.querySelectorAll('.nav-item')).find(btn => {
+      const attr = btn.getAttribute('onclick') || '';
+      return attr.includes(`'${tabId}'`);
+    });
+    if (navBtn) switchTab(tabId, navBtn);
   }
 
   function toggleTheater() { document.body.classList.toggle('theater-mode'); }
@@ -833,15 +845,24 @@
     el.innerText = `${names} ${typingUsers.size > 1 ? 'are' : 'is'} typing...`;
   }
 
-  // FIX 4: Safety check before sending chat to prevent errors
+  // FIX: send with clear user feedback for every failure path (empty message, no room, disconnected)
   function sendMsg() {
     const inputField = document.getElementById('chatInput');
     const text = inputField.value.trim();
-    if (text && socket && socket.connected) {
-      socket.emit('chat-message', { roomId, user: username, text });
-      socket.emit('typing', { roomId, user: username, isTyping: false });
-      inputField.value = '';
+    if (!text) return;
+
+    if (!roomId) {
+      toast('Join a room before sending messages', 'error');
+      return;
     }
+    if (!socket || !socket.connected) {
+      toast('Not connected — reconnecting, try again in a moment', 'warning');
+      return;
+    }
+
+    socket.emit('chat-message', { roomId, user: username, text });
+    socket.emit('typing', { roomId, user: username, isTyping: false });
+    inputField.value = '';
   }
   document.getElementById('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMsg(); });
 
@@ -870,17 +891,48 @@
   function loadYouTubeApi() {
     const tag = document.createElement('script');
     tag.src = "https://www.youtube.com/iframe_api";
+    tag.onerror = () => toast('Could not reach YouTube — check your connection', 'error');
     document.head.appendChild(tag);
+
+    // Safety net: if the API script loads but never calls back (blocked embed,
+    // ad blocker, offline), stop waiting and tell the user instead of hanging forever.
+    clearTimeout(ytApiTimeoutHandle);
+    ytApiTimeoutHandle = setTimeout(() => {
+      if (!ytApiReady) toast('YouTube player failed to load — try refreshing', 'error');
+    }, YT_API_READY_TIMEOUT_MS);
   }
   function onYouTubeIframeAPIReady() {
+    ytApiReady = true;
+    clearTimeout(ytApiTimeoutHandle);
     player = new YT.Player('player', {
       playerVars: { playsinline: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, iv_load_policy: 3 },
-      events: { onStateChange: onPlayerStateChange }
+      events: {
+        onStateChange: onPlayerStateChange,
+        onError: onPlayerError
+      }
     });
   }
+  function onPlayerError(event) {
+    const messages = {
+      2: 'Invalid video link',
+      5: 'This video cannot be played in this player',
+      100: 'Video not found or removed',
+      101: 'The video owner disabled playback here',
+      150: 'The video owner disabled playback here'
+    };
+    toast(messages[event.data] || 'YouTube playback error', 'error');
+  }
   function ytLoad(videoId, seekSeconds) {
+    const deadline = Date.now() + YT_API_READY_TIMEOUT_MS;
     const attempt = () => {
-      if (!player || typeof player.loadVideoById !== 'function') { setTimeout(attempt, 250); return; }
+      if (!player || typeof player.loadVideoById !== 'function') {
+        if (Date.now() > deadline) {
+          toast('YouTube player is not ready — try refreshing the page', 'error');
+          return;
+        }
+        setTimeout(attempt, 250);
+        return;
+      }
       if (typeof seekSeconds === 'number' && seekSeconds > 0.5) player.loadVideoById(videoId, seekSeconds);
       else player.loadVideoById(videoId);
     };
@@ -946,6 +998,19 @@
     if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
+    // If autoplay is blocked by the browser, fall back to a muted autoplay attempt
+    // (allowed almost everywhere) and prompt the user to unmute, instead of failing silently.
+    const attemptAutoplay = () => {
+      html5El.play().catch(() => {
+        html5El.muted = true;
+        html5El.play().then(() => {
+          toast('Autoplay was blocked — playing muted. Tap the video to unmute.', 'warning');
+        }).catch(() => {
+          toast('Tap the video to start playback', 'warning');
+        });
+      });
+    };
+
     const isM3u8 = /\.m3u8($|\?)/i.test(url);
     if (isM3u8 && Hls.isSupported()) {
       hlsInstance = new Hls();
@@ -955,9 +1020,35 @@
         populateQualitySelect(hlsInstance.levels);
         populateAudioTrackSelect(hlsInstance.audioTracks);
         html5El.currentTime = seekTime || 0;
-        if (autoplay) html5El.play().catch(() => {});
+        if (autoplay) attemptAutoplay();
       });
-      hlsInstance.on(Hls.Events.ERROR, (evt, data) => { if (data.fatal) toast('Playback error: ' + data.type, 'error'); });
+      hlsInstance.on(Hls.Events.ERROR, (evt, data) => {
+        if (data.fatal) {
+          toast('Playback error: ' + data.type, 'error');
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hlsInstance.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hlsInstance.recoverMediaError();
+              break;
+            default:
+              hlsInstance.destroy();
+              hlsInstance = null;
+              break;
+          }
+        }
+      });
+    } else if (isM3u8 && html5El.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari/iOS)
+      document.getElementById('qualitySelect').innerHTML = '<option value="-1">Source</option>';
+      document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
+      html5El.src = url;
+      html5El.onerror = () => toast('Could not load that stream — check the link', 'error');
+      html5El.addEventListener('loadedmetadata', () => {
+        html5El.currentTime = seekTime || 0;
+        if (autoplay) attemptAutoplay();
+      }, { once: true });
     } else {
       document.getElementById('qualitySelect').innerHTML = '<option value="-1">Source</option>';
       document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
@@ -965,7 +1056,7 @@
       html5El.onerror = () => toast('Could not load that link — check it points directly to a video file', 'error');
       html5El.addEventListener('loadedmetadata', () => {
         html5El.currentTime = seekTime || 0;
-        if (autoplay) html5El.play().catch(() => {});
+        if (autoplay) attemptAutoplay();
       }, { once: true });
     }
   }
@@ -993,6 +1084,10 @@
     tapZone.addEventListener('click', () => {
       document.getElementById('audioMenu').classList.remove('show');
       if (locked) { showUnlockBriefly(); return; }
+      // If the media element is muted (from a blocked-autoplay fallback), a tap unmutes it.
+      if (activeSourceType === 'raw' && html5El && html5El.muted) {
+        html5El.muted = false;
+      }
       if (controlsVisible) hideControlsNow(); else showControlsNow();
     });
     vc.addEventListener('mousemove', () => { if (!locked) showControlsNow(); });
@@ -1084,7 +1179,9 @@
     }
     if (activeSourceType === 'raw' && html5El) {
       if (!isHost && html5El.paused) { toast('Only the Host can pause or play the video.', 'warning'); return; }
-      if (html5El.paused) html5El.play(); else html5El.pause();
+      if (html5El.muted) html5El.muted = false;
+      if (html5El.paused) html5El.play().catch(() => toast('Playback was blocked by the browser', 'warning'));
+      else html5El.pause();
     }
   }
 
@@ -1104,7 +1201,7 @@
 
   function onVolumeChange(val) {
     if (activeSourceType === 'youtube' && player && player.setVolume) player.setVolume(val);
-    else if (html5El) html5El.volume = val / 100;
+    else if (html5El) { html5El.volume = val / 100; if (val > 0) html5El.muted = false; }
   }
 
   function cycleSpeed() {
@@ -1179,17 +1276,30 @@
   }
   document.getElementById('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleUniversalSearch(); });
 
+  // FIX: give clear, distinct feedback for every path — added-to-queue for guests,
+  // now-playing for hosts — and jump to the Playlist tab so the addition is visible.
   function addAndMaybePlay(item) {
+    if (!roomId || !socket || !socket.connected) {
+      toast('Not connected to a room yet', 'error');
+      return;
+    }
     const key = item.id || item.url;
     videoRegistry[key] = item;
     socket.emit('add-to-queue', { roomId, video: item });
-    if (!isHost) { toast('Added to queue — waiting for host to play', 'success'); return; }
+
+    if (!isHost) {
+      toast('Added to queue — waiting for host to play', 'success');
+      switchTabProgrammatic('playlist');
+      return;
+    }
+    toast('Added — now playing', 'success');
+    switchTabProgrammatic('playlist');
     routeItemForPlayback(item);
   }
 
   function playQueueItem(key) {
     const item = videoRegistry[key];
-    if (!item) return;
+    if (!item) { toast('That item is no longer available', 'error'); return; }
     if (!isHost) { toast('Only the Host can start playback.', 'warning'); return; }
     routeItemForPlayback(item);
   }
@@ -1330,7 +1440,7 @@
       updateLoadMoreVisibility();
     } catch (error) {
       document.getElementById('searchHeading').innerText = 'Search failed.';
-      toast('Could not reach YouTube', 'error');
+      toast('Could not reach YouTube: ' + error.message, 'error');
     }
   }
 
@@ -1346,7 +1456,7 @@
       updateLoadMoreVisibility();
     } catch (error) {
       document.getElementById('searchHeading').innerText = 'Could not load trending.';
-      toast('Could not reach YouTube', 'error');
+      toast('Could not reach YouTube: ' + error.message, 'error');
     }
   }
 
