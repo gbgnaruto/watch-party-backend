@@ -2,29 +2,31 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
+const util = require('util');
 const path = require('path');
 const fs = require('fs');
 
+const execAsync = util.promisify(exec);
 const app = express();
-app.use(cors());
-app.use(express.json()); // Essential for parsing POST bodies
 
-// Ensure the root public directory exists
+app.use(cors());
+app.use(express.json());
+
+// Ensure public directory exists
 const publicDir = path.join(__dirname, 'public');
 if (!fs.existsSync(publicDir)) {
-    fs.mkdirSync(publicDir);
+    fs.mkdirSync(publicDir, { recursive: true });
 }
 app.use('/public', express.static(publicDir));
 
-// ── Disk Cleanup — auto-delete stream folders older than 4 hours ──
-// Render free tier has ~500MB disk. A 2hr film generates ~1.5GB of .ts segments.
-// Without cleanup the server crashes on the 2nd or 3rd conversion.
+// ── Disk Cleanup — Auto-delete stream folders older than 4 hours ──
 const STREAM_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
-const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;    // run every 30 minutes
+const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;    // Every 30 minutes
 
 function cleanOldStreams() {
     try {
+        if (!fs.existsSync(publicDir)) return;
         const entries = fs.readdirSync(publicDir);
         let deleted = 0, freed = 0;
 
@@ -37,7 +39,6 @@ function cleanOldStreams() {
                 const ageMs = Date.now() - stat.mtimeMs;
                 if (ageMs < STREAM_MAX_AGE_MS) continue;
 
-                // Calculate folder size before deleting
                 const files = fs.readdirSync(dir);
                 for (const f of files) {
                     try { freed += fs.statSync(path.join(dir, f)).size; } catch(_) {}
@@ -46,7 +47,6 @@ function cleanOldStreams() {
                 fs.rmdirSync(dir);
                 deleted++;
 
-                // Also remove from jobs store
                 for (const [jid, job] of Object.entries(jobs)) {
                     if (job.streamId === name) {
                         delete jobs[jid];
@@ -67,35 +67,35 @@ function cleanOldStreams() {
     }
 }
 
-// Run cleanup on startup (clears leftover files from previous deploys)
 cleanOldStreams();
-// Then run every 30 minutes
 setInterval(cleanOldStreams, CLEANUP_INTERVAL_MS);
 
-// Manual cleanup endpoint — callable from browser for immediate purge
+// Manual cleanup endpoint
 app.post('/api/cleanup', (req, res) => {
     cleanOldStreams();
-    const dirs = fs.readdirSync(publicDir).filter(n => n.startsWith('stream_')).length;
+    const dirs = fs.existsSync(publicDir) ? fs.readdirSync(publicDir).filter(n => n.startsWith('stream_')).length : 0;
     res.json({ status: 'ok', remainingStreams: dirs });
 });
 
-// Disk usage endpoint — shows how full the server is
+// Disk usage endpoint
 app.get('/api/disk', (req, res) => {
     try {
         let totalBytes = 0;
         const streams = [];
-        for (const name of fs.readdirSync(publicDir)) {
-            if (!name.startsWith('stream_')) continue;
-            const dir = path.join(publicDir, name);
-            let size = 0;
-            try {
-                for (const f of fs.readdirSync(dir)) {
-                    try { size += fs.statSync(path.join(dir, f)).size; } catch(_) {}
-                }
-            } catch(_) {}
-            const ageMins = Math.round((Date.now() - fs.statSync(dir).mtimeMs) / 60000);
-            totalBytes += size;
-            streams.push({ name, sizeMb: (size/1024/1024).toFixed(1), ageMins });
+        if (fs.existsSync(publicDir)) {
+            for (const name of fs.readdirSync(publicDir)) {
+                if (!name.startsWith('stream_')) continue;
+                const dir = path.join(publicDir, name);
+                let size = 0;
+                try {
+                    for (const f of fs.readdirSync(dir)) {
+                        try { size += fs.statSync(path.join(dir, f)).size; } catch(_) {}
+                    }
+                } catch(_) {}
+                const ageMins = Math.round((Date.now() - fs.statSync(dir).mtimeMs) / 60000);
+                totalBytes += size;
+                streams.push({ name, sizeMb: (size/1024/1024).toFixed(1), ageMins });
+            }
         }
         res.json({
             totalMb: (totalBytes/1024/1024).toFixed(1),
@@ -107,20 +107,17 @@ app.get('/api/disk', (req, res) => {
     }
 });
 
-// Keep-Alive Pulse Route
+// Root Keep-Alive Route
 app.get('/', (req, res) => {
     res.status(200).send('SyncTube Backend is Awake and Running! 🚀');
 });
 
-// In-memory job store — tracks all active/completed conversions
+// In-memory job store
 const jobs = {};
-
-// How many 6-second segments must exist before we tell the frontend to start playing
-// 5 segments = 30 seconds of buffer — enough to start smoothly
 const LIVE_START_SEGMENTS = 5;
 
-// --- STEP 1: Start live-streaming conversion, return job ID immediately ---
-app.post('/api/convert', (req, res) => {
+// --- Conversion Route (Asynchronous Event-Loop Safe) ---
+app.post('/api/convert', async (req, res) => {
     const { videoUrl } = req.body;
 
     if (!videoUrl || typeof videoUrl !== 'string') {
@@ -139,7 +136,6 @@ app.post('/api/convert', (req, res) => {
 
     const outputPath = path.join(streamDir, 'playlist.m3u8');
 
-    // Register job immediately
     jobs[jobId] = {
         status: 'pending',
         streamId,
@@ -149,236 +145,180 @@ app.post('/api/convert', (req, res) => {
         segments: 0
     };
 
-    // Reply instantly — frontend polls status
     res.json({ status: 'queued', jobId });
 
-    // ── Feature 4+7: Probe for title, duration, audio track names ──
-    let numAudio = 1;
-    let videoTitle = '';
-    let videoDuration = 0;
-    let audioLangs = [];
-    const { execSync } = require('child_process');
+    // Execute background tasks asynchronously to prevent blocking the event loop
+    (async () => {
+        let numAudio = 1;
+        let videoTitle = '';
+        let videoDuration = 0;
+        let audioLangs = [];
 
-    try {
-        const probeJson = execSync(
-            `ffprobe -v quiet -print_format json -show_format -show_streams "${videoUrl.replace(/"/g,'\"')}"`,
-            { timeout: 20000 }
-        ).toString();
-        const probe = JSON.parse(probeJson);
+        try {
+            const safeUrl = videoUrl.replace(/"/g, '\"');
+            const { stdout: probeJson } = await execAsync(
+                `ffprobe -v quiet -print_format json -show_format -show_streams "${safeUrl}"`,
+                { timeout: 20000 }
+            );
+            const probe = JSON.parse(probeJson);
 
-        // Title from metadata
-        videoTitle = probe.format?.tags?.title || probe.format?.tags?.TITLE || '';
-        videoDuration = parseFloat(probe.format?.duration || 0);
+            videoTitle = probe.format?.tags?.title || probe.format?.tags?.TITLE || '';
+            videoDuration = parseFloat(probe.format?.duration || 0);
 
-        // Audio streams with real language names
-        const audioStreams = (probe.streams || []).filter(s => s.codec_type === 'audio');
-        numAudio = audioStreams.length || 1;
-        audioLangs = audioStreams.map((s, i) => {
-            const lang = s.tags?.language || s.tags?.LANGUAGE || '';
-            const title = s.tags?.title || s.tags?.TITLE || '';
-            // Build a human-readable label: prefer title, then language code mapped to name
-            const langMap = { eng:'English', hin:'Hindi', jpn:'Japanese', tam:'Tamil',
-                              tel:'Telugu', fra:'French', spa:'Spanish', kor:'Korean',
-                              ara:'Arabic', por:'Portuguese', deu:'German', zho:'Chinese' };
-            const label = title || langMap[lang] || (lang ? lang.toUpperCase() : `Track ${i+1}`);
-            return { index: i, lang, label };
-        });
+            const audioStreams = (probe.streams || []).filter(s => s.codec_type === 'audio');
+            numAudio = audioStreams.length || 1;
+            audioLangs = audioStreams.map((s, i) => {
+                const lang = s.tags?.language || s.tags?.LANGUAGE || '';
+                const title = s.tags?.title || s.tags?.TITLE || '';
+                const langMap = { eng:'English', hin:'Hindi', jpn:'Japanese', tam:'Tamil',
+                                  tel:'Telugu', fra:'French', spa:'Spanish', kor:'Korean',
+                                  ara:'Arabic', por:'Portuguese', deu:'German', zho:'Chinese' };
+                const label = title || langMap[lang] || (lang ? lang.toUpperCase() : `Track ${i+1}`);
+                return { index: i, lang, label };
+            });
+        } catch(e) {
+            console.log('[Probe] ffprobe failed:', e.message);
+        }
 
-        console.log(`[Probe] Job ${jobId}: title="${videoTitle}" duration=${videoDuration}s audio=${numAudio}`);
-        console.log(`[Probe] Audio tracks:`, audioLangs.map(a => a.label).join(', '));
+        jobs[jobId].title = videoTitle;
+        jobs[jobId].duration = videoDuration;
+        jobs[jobId].audioLangs = audioLangs;
 
-    } catch(e) {
-        console.log('[Probe] ffprobe failed:', e.message);
-    }
+        const thumbPath = path.join(streamDir, 'thumb.jpg');
+        try {
+            await execAsync(
+                `ffmpeg -y -ss 10 -i "${videoUrl.replace(/"/g,'\"')}" -frames:v 1 -q:v 2 -vf scale=320:-1 "${thumbPath}"`,
+                { timeout: 25000 }
+            );
+            jobs[jobId].thumbUrl = `/public/${streamId}/thumb.jpg`;
+        } catch(e) {
+            console.log('[Thumb] Thumbnail generation failed:', e.message);
+        }
 
-    // Store metadata in job for frontend to retrieve
-    jobs[jobId].title    = videoTitle;
-    jobs[jobId].duration = videoDuration;
-    jobs[jobId].audioLangs = audioLangs;
-
-    // ── Feature 8: Generate thumbnail from frame at 10s ──
-    const thumbPath = path.join(streamDir, 'thumb.jpg');
-    try {
-        execSync(
-            `ffmpeg -y -ss 10 -i "${videoUrl.replace(/"/g,'\"')}" -frames:v 1 -q:v 2 -vf scale=320:-1 "${thumbPath}"`,
-            { timeout: 25000 }
-        );
-        jobs[jobId].thumbUrl = `/public/${streamId}/thumb.jpg`;
-        console.log(`[Thumb] Job ${jobId}: thumbnail generated`);
-    } catch(e) {
-        console.log('[Thumb] Thumbnail generation failed:', e.message);
-    }
-
-    // ── Build FFmpeg args for multi-audio HLS ──
-    // FFmpeg 4.3 strategy: transcode video+primary audio together,
-    // then transcode each extra audio track separately.
-    // We then craft a master playlist that links them all as EXT-X-MEDIA groups.
-    // This is the most reliable approach for HLS.js audioTracks support.
-
-    if (numAudio <= 1) {
-        // ── Single audio: simple single-output HLS ──
-        const args = [
-            '-y',
+        const commonInput = [
             '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             '-headers', 'Referer: https://www.google.com/\r\nAccept: */*\r\nAccept-Language: en-US,en;q=0.9\r\n',
             '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-            '-i', videoUrl,
-            '-map', '0:v:0', '-map', '0:a:0',
-            '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
-            '-max_muxing_queue_size', '9999',
-            '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
-            '-hls_flags', 'append_list',
-            '-hls_segment_filename', path.join(streamDir, 'seg_%03d.ts'),
-            outputPath
+            '-i', videoUrl
         ];
-    }
-    // fall through to spawn below
 
-    // ── Multi-audio: one FFmpeg pass per audio track + video ──
-    // Pass 0: video + audio track 0 (default)
-    // Pass 1..N: audio tracks 1..N only (no video, much faster)
-    const commonInput = [
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        '-headers', 'Referer: https://www.google.com/\r\nAccept: */*\r\nAccept-Language: en-US,en;q=0.9\r\n',
-        '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-        '-i', videoUrl
-    ];
-
-    // Primary pass: video + track 0
-    const args = [
-        '-y',
-        ...commonInput,
-        '-map', '0:v:0', '-map', '0:a:0',
-        '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
-        '-max_muxing_queue_size', '9999',
-        '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
-        '-hls_flags', 'append_list',
-        '-hls_segment_filename', path.join(streamDir, 'seg_0_%03d.ts'),
-        path.join(streamDir, 'stream_0.m3u8')
-    ];
-
-    // Spawn extra audio-only passes for tracks 1..N (parallel)
-    for (let i = 1; i < numAudio; i++) {
-        const aArgs = [
-            '-y',
-            ...commonInput,
-            '-map', `0:a:${i}`,
-            '-vn',
-            '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
-            '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
-            '-hls_flags', 'append_list',
-            '-hls_segment_filename', path.join(streamDir, `seg_${i}_%03d.ts`),
-            path.join(streamDir, `stream_${i}.m3u8`)
-        ];
-        const aProc = spawn('ffmpeg', aArgs);
-        aProc.stderr.on('data', () => {}); // suppress
-        aProc.on('close', code => console.log(`[FFmpeg] Audio track ${i} done (code ${code})`));
-        aProc.on('error', e => console.error(`[FFmpeg] Audio track ${i} error:`, e.message));
-    }
-
-    // After primary pass finishes, build the master playlist
-    // This is called from the proc.on('close') handler below
-    jobs[jobId]._buildMaster = () => {
-        try {
-            const label0 = audioLangs[0]?.label || 'Track 1';
-            const lang0  = audioLangs[0]?.lang  || 'und';
-
-            let master = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
-
-            // Add EXT-X-MEDIA entries for each audio track
-            for (let i = 0; i < numAudio; i++) {
-                const label = audioLangs[i]?.label || `Track ${i+1}`;
-                const lang  = audioLangs[i]?.lang  || 'und';
-                const def   = i === 0 ? 'YES' : 'NO';
-                const uri   = i === 0 ? 'stream_0.m3u8' : `stream_${i}.m3u8`;
-                master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${label}",LANGUAGE="${lang}",DEFAULT=${def},AUTOSELECT=${def},URI="${uri}"\n`;
-            }
-
-            // Video stream pointing to stream_0 (which has video+default audio)
-            master += `\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,AUDIO="audio"\nstream_0.m3u8\n`;
-            fs.writeFileSync(path.join(streamDir, 'playlist.m3u8'), master);
-            console.log(`[Master] Job ${jobId}: master playlist written with ${numAudio} audio tracks`);
-        } catch(e) {
-            console.error('[Master] Failed to write master playlist:', e.message);
-        }
-    };
-
-    console.log(`[FFmpeg] Live job ${jobId} started for: ${videoUrl}`);
-    const proc = spawn('ffmpeg', args);
-
-    // Watch for new segment files — update segment count in real time
-    const segWatcher = fs.watch(streamDir, (event, filename) => {
-        if (filename && filename.endsWith('.ts')) {
-            const segs = fs.readdirSync(streamDir).filter(f => f.endsWith('.ts')).length;
-            jobs[jobId].segments = segs;
-
-            // Once we have enough buffer, tell the frontend it can start playing
-            if (jobs[jobId].status === 'pending' && segs >= LIVE_START_SEGMENTS) {
-                console.log(`[FFmpeg] Job ${jobId} live — ${segs} segments ready, signalling frontend`);
-                jobs[jobId].status = 'live';
-            }
-        }
-    });
-
-    // ── Feature 5: Parse FFmpeg stderr for real-time progress ──
-    let ffmpegBuffer = '';
-    proc.stderr.on('data', d => {
-        ffmpegBuffer += d.toString();
-        const lines = ffmpegBuffer.split('\r');
-        ffmpegBuffer = lines.pop(); // keep incomplete line
-
-        for (const line of lines) {
-            if (!line.includes('time=')) continue;
-            // Parse time= field: time=01:23:45.67
-            const m = line.match(/time=([\d:]+\.?\d*)/);
-            if (m) {
-                const parts = m[1].split(':').map(Number);
-                const secs = parts.length === 3
-                    ? parts[0]*3600 + parts[1]*60 + parts[2]
-                    : parts[0]*60 + parts[1];
-                jobs[jobId].progress = {
-                    currentTime: secs,
-                    duration: jobs[jobId].duration || 0,
-                    pct: jobs[jobId].duration > 0
-                        ? Math.min(99, Math.round((secs / jobs[jobId].duration) * 100))
-                        : null
-                };
-            }
-        }
-    });
-
-    proc.on('close', code => {
-        segWatcher.close();
-        if (code === 0) {
-            // Build master playlist for multi-audio before marking done
-            if (jobs[jobId]?._buildMaster) {
-                jobs[jobId]._buildMaster();
-                delete jobs[jobId]._buildMaster;
-            }
-            console.log(`[FFmpeg] Job ${jobId} fully done ✅`);
-            jobs[jobId].status = 'done';
+        let args;
+        if (numAudio <= 1) {
+            args = [
+                '-y',
+                ...commonInput,
+                '-map', '0:v:0', '-map', '0:a:0',
+                '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+                '-max_muxing_queue_size', '9999',
+                '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+                '-hls_flags', 'append_list',
+                '-hls_segment_filename', path.join(streamDir, 'seg_%03d.ts'),
+                outputPath
+            ];
         } else {
-            console.error(`[FFmpeg] Job ${jobId} failed with code ${code}`);
-            if (jobs[jobId]?.status === 'pending') {
-                jobs[jobId].status = 'error';
-                jobs[jobId].error  = `FFmpeg exited with code ${code}`;
-            }
-        }
-    });
+            args = [
+                '-y',
+                ...commonInput,
+                '-map', '0:v:0', '-map', '0:a:0',
+                '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+                '-max_muxing_queue_size', '9999',
+                '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+                '-hls_flags', 'append_list',
+                '-hls_segment_filename', path.join(streamDir, 'seg_0_%03d.ts'),
+                path.join(streamDir, 'stream_0.m3u8')
+            ];
 
-    proc.on('error', err => {
-        segWatcher.close();
-        console.error(`[FFmpeg] Job ${jobId} spawn error:`, err);
-        if (jobs[jobId].status === 'pending') {
-            jobs[jobId].status = 'error';
-            jobs[jobId].error  = err.message;
+            for (let i = 1; i < numAudio; i++) {
+                const aArgs = [
+                    '-y',
+                    ...commonInput,
+                    '-map', `0:a:${i}`,
+                    '-vn',
+                    '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+                    '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+                    '-hls_flags', 'append_list',
+                    '-hls_segment_filename', path.join(streamDir, `seg_${i}_%03d.ts`),
+                    path.join(streamDir, `stream_${i}.m3u8`)
+                ];
+                const aProc = spawn('ffmpeg', aArgs);
+                aProc.stderr.on('data', () => {});
+                aProc.on('error', () => {});
+            }
+
+            jobs[jobId]._buildMaster = () => {
+                try {
+                    let master = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
+                    for (let i = 0; i < numAudio; i++) {
+                        const label = audioLangs[i]?.label || `Track ${i+1}`;
+                        const lang  = audioLangs[i]?.lang  || 'und';
+                        const def   = i === 0 ? 'YES' : 'NO';
+                        const uri   = i === 0 ? 'stream_0.m3u8' : `stream_${i}.m3u8`;
+                        master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${label}",LANGUAGE="${lang}",DEFAULT=${def},AUTOSELECT=${def},URI="${uri}"\n`;
+                    }
+                    master += `\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,AUDIO="audio"\nstream_0.m3u8\n`;
+                    fs.writeFileSync(outputPath, master);
+                } catch(e) {}
+            };
         }
-    });
+
+        const proc = spawn('ffmpeg', args);
+
+        const segWatcher = fs.watch(streamDir, (event, filename) => {
+            if (filename && filename.endsWith('.ts')) {
+                const segs = fs.readdirSync(streamDir).filter(f => f.endsWith('.ts')).length;
+                jobs[jobId].segments = segs;
+                if (jobs[jobId].status === 'pending' && segs >= LIVE_START_SEGMENTS) {
+                    jobs[jobId].status = 'live';
+                }
+            }
+        });
+
+        let ffmpegBuffer = '';
+        proc.stderr.on('data', d => {
+            ffmpegBuffer += d.toString();
+            const lines = ffmpegBuffer.split('\r');
+            ffmpegBuffer = lines.pop();
+            for (const line of lines) {
+                if (!line.includes('time=')) continue;
+                const m = line.match(/time=([\d:]+\.?\d*)/);
+                if (m) {
+                    const parts = m[1].split(':').map(Number);
+                    const secs = parts.length === 3 ? parts[0]*3600 + parts[1]*60 + parts[2] : parts[0]*60 + parts[1];
+                    jobs[jobId].progress = {
+                        currentTime: secs,
+                        duration: jobs[jobId].duration || 0,
+                        pct: jobs[jobId].duration > 0 ? Math.min(99, Math.round((secs / jobs[jobId].duration) * 100)) : null
+                    };
+                }
+            }
+        });
+
+        proc.on('close', code => {
+            segWatcher.close();
+            if (code === 0) {
+                if (jobs[jobId]?._buildMaster) {
+                    jobs[jobId]._buildMaster();
+                }
+                jobs[jobId].status = 'done';
+            } else {
+                if (jobs[jobId]?.status === 'pending') {
+                    jobs[jobId].status = 'error';
+                    jobs[jobId].error = `FFmpeg exited with code ${code}`;
+                }
+            }
+        });
+
+        proc.on('error', err => {
+            segWatcher.close();
+            if (jobs[jobId].status === 'pending') {
+                jobs[jobId].status = 'error';
+                jobs[jobId].error = err.message;
+            }
+        });
+    })().catch(err => console.error('[Convert Background Error]', err));
 });
 
-// --- STEP 2: Frontend polls this every 3s ---
-// Returns 'pending' until 30s of video is ready, then 'Success' to start playback
-// FFmpeg keeps writing segments in the background while the user watches
+// --- Job Status Polling Route ---
 app.get('/api/convert/status/:jobId', (req, res) => {
     const job = jobs[req.params.jobId];
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -392,13 +332,12 @@ app.get('/api/convert/status/:jobId', (req, res) => {
             title: job.title || '',
             duration: job.duration || 0,
             audioLangs: job.audioLangs || [],
-            thumbUrl: job.thumbUrl ? `https://gameearn-backend.onrender.com${job.thumbUrl}` : ''
+            thumbUrl: job.thumbUrl ? `https://${req.get('host')}${job.thumbUrl}` : ''
         });
     }
     if (job.status === 'error') {
         return res.json({ status: 'Error', error: job.error });
     }
-    // Still buffering — return progress for frontend display
     res.json({
         status: 'pending',
         segments: job.segments || 0,
@@ -408,15 +347,12 @@ app.get('/api/convert/status/:jobId', (req, res) => {
     });
 });
 
-// Health check — confirms FFmpeg is present
+// Health check
 app.get('/api/health', (req, res) => {
-    const { execSync } = require('child_process');
-    try {
-        const ver = execSync('ffmpeg -version 2>&1').toString().split('\n')[0];
-        res.json({ status: 'ok', ffmpeg: ver });
-    } catch (e) {
-        res.status(500).json({ status: 'error', ffmpeg: 'NOT FOUND' });
-    }
+    exec('ffmpeg -version 2>&1', (err, stdout) => {
+        if (err) return res.status(500).json({ status: 'error', ffmpeg: 'NOT FOUND' });
+        res.json({ status: 'ok', ffmpeg: stdout.split('\n')[0] });
+    });
 });
 
 const server = http.createServer(app);
@@ -445,8 +381,6 @@ io.on('connection', (socket) => {
         }
 
         const room = rooms[roomId];
-
-        // FIXED GHOST CLONE LOGIC: Scan the entire user array, including disconnected entries waiting out their timer
         const existingUserIndex = room.users.findIndex(u => u.userId === userId);
         let assignHost = false;
         let assignCoHost = false;
@@ -462,8 +396,6 @@ io.on('connection', (socket) => {
 
             assignHost = oldUserInstance.isHost;
             assignCoHost = oldUserInstance.isCoHost;
-
-            // Purge the old socket profile placeholder
             room.users.splice(existingUserIndex, 1);
         } else if (room.users.filter(u => !u.isPendingRemoval).length === 0) {
             assignHost = true;
@@ -497,7 +429,6 @@ io.on('connection', (socket) => {
         emitActiveRooms();
     });
 
-    // --- HOST DELEGATION LOGIC ---
     socket.on('transfer_host', (data) => {
         const room = rooms[data.roomId];
         if (room && room.host === socket.id) {
@@ -524,7 +455,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- MEDIA SYNC LOGIC ---
     socket.on('change_video', (data) => {
         const room = rooms[data.roomId];
         const user = room?.users.find(u => u.socketId === socket.id);
@@ -555,7 +485,6 @@ io.on('connection', (socket) => {
         if (room && user && (user.isHost || user.isCoHost)) socket.to(data.roomId).emit('sync_pause', data.time);
     });
 
-    // HEARTBEAT SYNC
     socket.on('broadcast_sync_data', (data) => {
         const room = rooms[data.roomId];
         if (room && room.host === socket.id) {
@@ -567,14 +496,12 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- CHAT & VOICE ---
     socket.on('chat_message', (data) => { if (rooms[data.roomId]) io.to(data.roomId).emit('chat_message', data); });
     socket.on('voice_join', (data) => { socket.to(data.roomId).emit('voice_user_joined', { socketId: socket.id }); });
     socket.on('webrtc_offer', (data) => { io.to(data.target).emit('webrtc_offer', { sender: socket.id, sdp: data.sdp }); });
     socket.on('webrtc_answer', (data) => { io.to(data.target).emit('webrtc_answer', { sender: socket.id, sdp: data.sdp }); });
     socket.on('webrtc_ice', (data) => { io.to(data.target).emit('webrtc_ice', { sender: socket.id, candidate: data.candidate }); });
 
-    // --- NON-BLOCKING DISCONNECT LOGIC ---
     socket.on('disconnect', () => {
         for (const roomId in rooms) {
             const room = rooms[roomId];
@@ -631,4 +558,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => { console.log(`✅ SyncTube Server v33 running on port ${PORT}`); });
+server.listen(PORT, () => { console.log(`✅ SyncTube Server running on port ${PORT}`); });
