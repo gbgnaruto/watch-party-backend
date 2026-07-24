@@ -421,7 +421,7 @@
 
 </div>
 
-<!-- Members Modal (includes Voice Chat) -->
+<!-- Members Modal -->
 <div class="modal-overlay" id="membersModal" onclick="if(event.target===this) closeMembersModal()">
   <div class="modal-panel">
     <div class="modal-header">
@@ -532,10 +532,113 @@
   let hideTimer = null;
   let unlockHideTimer = null;
 
-  // FIX 1: Merge into a single socket connection to avoid disconnect caching issues
+
+  // FIX 1: UNIFIED SOCKET LIFECYCLE
+  // The socket connects immediately on page load, eliminating the race condition.
   const socket = io();
-  let socketSetupDone = false;
+
+  // Attach all listeners unconditionally right away
   socket.on('active-rooms', (rooms) => renderActiveRoomsList(rooms));
+
+  socket.on('connect', () => {
+    // If the socket reconnects while a user is ALREADY logged in (modal hidden)
+    if (roomId && username && document.getElementById('loginModal').style.display === 'none') {
+      socket.emit('join-room', { roomId, username });
+      setSyncStatus(true);
+    }
+  });
+
+  socket.on('disconnect', () => setSyncStatus(false));
+
+  socket.on('room-info', (data) => {
+    document.getElementById('userCount').innerText = data.count;
+    isHost = data.isAdmin;
+    const display = isHost ? 'block' : 'none';
+    document.getElementById('hostCrownTop').style.display = display;
+    document.getElementById('hostCrownSettings').style.display = display;
+    document.getElementById('clearQueueBtn').style.display = display;
+    if (data.queue) { cachedQueueData = data.queue; renderQueue(cachedQueueData); }
+  });
+
+  socket.on('members-update', (list) => renderMembers(list));
+
+  socket.on('initial-sync', (data) => {
+    if (data.sourceType === 'youtube' && data.videoId) {
+      switchToYoutubeView();
+      ytLoad(data.videoId, data.time);
+      if (data.playbackState !== 'playing') setTimeout(() => { if (player && player.pauseVideo) player.pauseVideo(); }, 400);
+    } else if (data.sourceType === 'raw' && data.rawUrl) {
+      loadRawSource(data.rawUrl, data.title || 'Direct Link', data.time, data.playbackState === 'playing');
+    }
+  });
+
+  socket.on('queue-update', (queue) => { cachedQueueData = queue; renderQueue(cachedQueueData); });
+
+  socket.on('chat-message', (msg) => {
+    const box = document.getElementById('chatBox');
+    const tsObj = msg.timestamp || Date.now();
+    const isAtBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 40;
+
+    if (msg.type === 'system') {
+      const textSafed = document.createElement('div');
+      textSafed.textContent = msg.text;
+      box.insertAdjacentHTML('beforeend', `<div class="chat-sys"><span class="sys-time">${formatTime(tsObj)}</span> ${textSafed.innerHTML}</div>`);
+    } else {
+      const color = avatarColor(msg.user);
+      box.insertAdjacentHTML('beforeend', `<div class="chat-msg">
+        <div class="mini-avatar" style="background:${color}; width:24px; height:24px; font-size:9px;">${initials(msg.user)}</div>
+        <div class="bubble">
+          <div><span class="chat-user">${escapeHtml(msg.user)}</span> <span class="chat-time">${formatTime(tsObj)}</span></div>
+          <div style="margin-top:2px;">${formatChatMessage(msg.text)}</div>
+        </div>
+      </div>`);
+    }
+    const isChatActive = document.getElementById('tab-chat').classList.contains('active');
+    if (!isChatActive) document.getElementById('chatBadge').style.display = 'block';
+    if (isAtBottom || !isChatActive) box.scrollTop = box.scrollHeight;
+  });
+
+  socket.on('typing', (data) => {
+    if (data.isTyping) typingUsers.add(data.user); else typingUsers.delete(data.user);
+    renderTypingIndicator();
+  });
+
+  socket.on('sync-video', (data) => {
+    suppressLocalEchoFor(REMOTE_ECHO_SUPPRESS_MS);
+    if (data.type === 'change') { switchToYoutubeView(); ytLoad(data.videoId); return; }
+    if (data.type === 'change-raw') { loadRawSource(data.url, data.title || 'Direct Link', 0, true); return; }
+
+    if (activeSourceType === 'youtube') {
+      if (!player) return;
+      if (data.type === 'play') player.playVideo();
+      if (data.type === 'pause') player.pauseVideo();
+      if (data.type === 'seek') { player.seekTo(data.time, true); player.playVideo(); }
+    } else if (activeSourceType === 'raw') {
+      if (!html5El) return;
+      if (data.type === 'play') html5El.play();
+      if (data.type === 'pause') html5El.pause();
+      if (data.type === 'seek') { html5El.currentTime = data.time; html5El.play(); }
+    }
+  });
+
+  socket.on('voice-participants', (list) => {
+    const next = {};
+    list.forEach(u => { next[u] = voiceParticipantsMap[u] || false; });
+    Object.keys(voiceParticipantsMap).forEach(u => { if (!(u in next)) cleanupVoiceUser(u); });
+    voiceParticipantsMap = next;
+    renderVoiceParticipants();
+  });
+
+  socket.on('voice-speaking', (data) => {
+    if (data.user in voiceParticipantsMap) { voiceParticipantsMap[data.user] = data.speaking; renderVoiceParticipants(); }
+  });
+
+  socket.on('voice-chunk', (data) => {
+    if (data.user === username) return;
+    enqueueVoiceClip(data.user, data.data);
+    markSpeaking(data.user);
+  });
+
 
   function renderActiveRoomsList(rooms) {
     const container = document.getElementById('activeRoomsList');
@@ -556,20 +659,30 @@
     setLoginMode('join');
   }
 
-  // FIX 2: Toast Debounce / Anti-Spam protection
+  // FIX 2: STRICT TOAST DEBOUNCE - Checks for matching text on screen so it can't duplicate
   function toast(message, type = 'default') {
     const host = document.getElementById('toastHost');
-    const existing = Array.from(host.children);
-    if (existing.some(el => el.textContent === message && el.classList.contains('show'))) {
-      return; // Stop identical toasts from stacking up
+    
+    // Check if the exact message is already rendered anywhere in the toast container
+    for (let i = 0; i < host.children.length; i++) {
+      if (host.children[i].textContent === message) {
+        return; 
+      }
     }
     
     const el = document.createElement('div');
     el.className = 'toast' + (type !== 'default' ? ' ' + type : '');
     el.textContent = message;
     host.appendChild(el);
-    requestAnimationFrame(() => el.classList.add('show'));
-    setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 250); }, 2400);
+    
+    // Force a layout reflow to ensure the animation triggers
+    void el.offsetWidth;
+    el.classList.add('show');
+    
+    setTimeout(() => { 
+      el.classList.remove('show'); 
+      setTimeout(() => el.remove(), 250); 
+    }, 2400);
   }
 
   function avatarColor(name) {
@@ -634,6 +747,7 @@
     document.getElementById('roomError').classList.remove('show');
   }
 
+  // UPDATED LOGIN FLOW
   function joinApp() {
     clearFieldErrors();
     const nameVal = document.getElementById('nameInput').value.trim();
@@ -673,9 +787,11 @@
     html5El = document.getElementById('html5Player');
     initPlayerOverlay();
 
-    setupSocketListeners();
-    socket.emit('join-room', { roomId, username });
-    setSyncStatus(true);
+    // Since the socket is already actively connected, emit immediately
+    if (socket.connected) {
+      socket.emit('join-room', { roomId, username });
+      setSyncStatus(true);
+    }
     
     loadYouTubeApi();
     fetchTrending(currentCategory);
@@ -693,118 +809,18 @@
     location.reload();
   }
 
-  function setupSocketListeners() {
-    if (socketSetupDone) return;
-    socketSetupDone = true;
-
-    socket.on('connect', () => { 
-      socket.emit('join-room', { roomId, username }); 
-      setSyncStatus(true); 
-    });
-    
-    socket.on('disconnect', () => setSyncStatus(false));
-
-    socket.on('room-info', (data) => {
-      document.getElementById('userCount').innerText = data.count;
-      isHost = data.isAdmin;
-      const display = isHost ? 'block' : 'none';
-      document.getElementById('hostCrownTop').style.display = display;
-      document.getElementById('hostCrownSettings').style.display = display;
-      document.getElementById('clearQueueBtn').style.display = display;
-      if (data.queue) { cachedQueueData = data.queue; renderQueue(cachedQueueData); }
-    });
-
-    socket.on('members-update', (list) => renderMembers(list));
-
-    socket.on('initial-sync', (data) => {
-      if (data.sourceType === 'youtube' && data.videoId) {
-        switchToYoutubeView();
-        ytLoad(data.videoId, data.time);
-        if (data.playbackState !== 'playing') setTimeout(() => { if (player && player.pauseVideo) player.pauseVideo(); }, 400);
-      } else if (data.sourceType === 'raw' && data.rawUrl) {
-        loadRawSource(data.rawUrl, data.title || 'Direct Link', data.time, data.playbackState === 'playing');
-      }
-    });
-
-    socket.on('queue-update', (queue) => { cachedQueueData = queue; renderQueue(cachedQueueData); });
-
-    socket.on('chat-message', (msg) => {
-      const box = document.getElementById('chatBox');
-      const tsObj = msg.timestamp || Date.now();
-      const isAtBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 40;
-
-      if (msg.type === 'system') {
-        const textSafed = document.createElement('div');
-        textSafed.textContent = msg.text;
-        box.insertAdjacentHTML('beforeend', `<div class="chat-sys"><span class="sys-time">${formatTime(tsObj)}</span> ${textSafed.innerHTML}</div>`);
-      } else {
-        const color = avatarColor(msg.user);
-        box.insertAdjacentHTML('beforeend', `<div class="chat-msg">
-          <div class="mini-avatar" style="background:${color}; width:24px; height:24px; font-size:9px;">${initials(msg.user)}</div>
-          <div class="bubble">
-            <div><span class="chat-user">${escapeHtml(msg.user)}</span> <span class="chat-time">${formatTime(tsObj)}</span></div>
-            <div style="margin-top:2px;">${formatChatMessage(msg.text)}</div>
-          </div>
-        </div>`);
-      }
-      const isChatActive = document.getElementById('tab-chat').classList.contains('active');
-      if (!isChatActive) document.getElementById('chatBadge').style.display = 'block';
-      if (isAtBottom || !isChatActive) box.scrollTop = box.scrollHeight;
-    });
-
-    socket.on('typing', (data) => {
-      if (data.isTyping) typingUsers.add(data.user); else typingUsers.delete(data.user);
-      renderTypingIndicator();
-    });
-
-    socket.on('sync-video', (data) => {
-      suppressLocalEchoFor(REMOTE_ECHO_SUPPRESS_MS);
-      if (data.type === 'change') { switchToYoutubeView(); ytLoad(data.videoId); return; }
-      if (data.type === 'change-raw') { loadRawSource(data.url, data.title || 'Direct Link', 0, true); return; }
-
-      if (activeSourceType === 'youtube') {
-        if (!player) return;
-        if (data.type === 'play') player.playVideo();
-        if (data.type === 'pause') player.pauseVideo();
-        if (data.type === 'seek') { player.seekTo(data.time, true); player.playVideo(); }
-      } else if (activeSourceType === 'raw') {
-        if (!html5El) return;
-        if (data.type === 'play') html5El.play();
-        if (data.type === 'pause') html5El.pause();
-        if (data.type === 'seek') { html5El.currentTime = data.time; html5El.play(); }
-      }
-    });
-
-    socket.on('voice-participants', (list) => {
-      const next = {};
-      list.forEach(u => { next[u] = voiceParticipantsMap[u] || false; });
-      Object.keys(voiceParticipantsMap).forEach(u => { if (!(u in next)) cleanupVoiceUser(u); });
-      voiceParticipantsMap = next;
-      renderVoiceParticipants();
-    });
-
-    socket.on('voice-speaking', (data) => {
-      if (data.user in voiceParticipantsMap) { voiceParticipantsMap[data.user] = data.speaking; renderVoiceParticipants(); }
-    });
-
-    socket.on('voice-chunk', (data) => {
-      if (data.user === username) return;
-      enqueueVoiceClip(data.user, data.data);
-      markSpeaking(data.user);
-    });
-  }
-
   function setSyncStatus(ok) {
     const badge = document.getElementById('syncBadge');
     const text = document.getElementById('syncText');
     if (ok) { badge.classList.remove('desynced'); text.textContent = 'SYNCED'; }
     else { badge.classList.add('desynced'); text.textContent = 'RECONNECTING'; }
   }
+  
   function suppressLocalEchoFor(ms) { remoteUpdateSuppressedUntil = Date.now() + ms; }
   function isLocalEchoSuppressed() { return Date.now() < remoteUpdateSuppressedUntil; }
 
   document.getElementById('chatInput').addEventListener('input', () => {
-    if (!socket) return;
+    if (!socket || !socket.connected) return;
     socket.emit('typing', { roomId, user: username, isTyping: true });
     clearTimeout(typingTimer);
     typingTimer = setTimeout(() => socket.emit('typing', { roomId, user: username, isTyping: false }), 1500);
@@ -817,10 +833,11 @@
     el.innerText = `${names} ${typingUsers.size > 1 ? 'are' : 'is'} typing...`;
   }
 
+  // FIX 4: Safety check before sending chat to prevent errors
   function sendMsg() {
     const inputField = document.getElementById('chatInput');
     const text = inputField.value.trim();
-    if (text && socket) {
+    if (text && socket && socket.connected) {
       socket.emit('chat-message', { roomId, user: username, text });
       socket.emit('typing', { roomId, user: username, isTyping: false });
       inputField.value = '';
@@ -1162,8 +1179,6 @@
   }
   document.getElementById('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleUniversalSearch(); });
 
-  // Adds an item to the shared queue (always — keeps the queue in sync for
-  // everyone), then, if the caller is host, decides how to play it.
   function addAndMaybePlay(item) {
     const key = item.id || item.url;
     videoRegistry[key] = item;
@@ -1172,7 +1187,6 @@
     routeItemForPlayback(item);
   }
 
-  // Tapping an item already in the queue — does not re-add it.
   function playQueueItem(key) {
     const item = videoRegistry[key];
     if (!item) return;
