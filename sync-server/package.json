@@ -1,7 +1,8 @@
 {
   "name": "synctube-pro",
-  "version": "4.0.0",
-  "private": true,
+  "version": "2.0.0",
+  "description": "Watch-together app with YouTube sync, direct-link/HLS playback, and a professional MX Player-style overlay.",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
@@ -9,8 +10,13 @@
     "express": "^4.19.2",
     "socket.io": "^4.7.5",
     "ffmpeg-static": "^5.2.0",
-    "ffprobe-static": "^3.1.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "optionalDependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/lib-storage": "^3.600.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
