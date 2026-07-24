@@ -4,167 +4,193 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
 <title>SyncTube Professional</title>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #07080c;
-    --panel: #0e1017;
-    --panel-hover: #161922;
-    --accent: #00f0ff;
-    --accent-glow: rgba(0, 240, 255, 0.15);
-    --text: #ffffff;
-    --text-dim: #8b92a5;
-    --border: #1f2433;
-    --danger: #ff4757;
-    --success: #2ed573;
-    --warning: #ffa502;
+    --bg: #06070a;
+    --bg-elevated: #0a0c11;
+    --panel: #12151d;
+    --panel-hover: #1a1e29;
+    --panel-border: #232838;
+    --accent: #00e5ff;
+    --accent-2: #7c5cff;
+    --accent-glow: rgba(0, 229, 255, 0.14);
+    --text: #f4f6fb;
+    --text-dim: #8b93a7;
+    --text-faint: #565e70;
+    --border: #1c202c;
+    --danger: #ff4d5e;
+    --success: #26d97a;
+    --warning: #ffb020;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow-lg: 0 24px 48px rgba(0,0,0,0.55);
+    --shadow-md: 0 10px 24px rgba(0,0,0,0.4);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
 
-  body { background: var(--bg); color: var(--text); height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; transition: all 0.3s ease; }
+  body { background: var(--bg); color: var(--text); height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 
-  .topbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: var(--bg); z-index: 10; border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 8px; }
-  .logo { font-family: 'Montserrat', sans-serif; font-weight: 800; font-size: 16px; letter-spacing: 1px; color: #fff; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .logo span { color: var(--accent); }
+  .topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: linear-gradient(180deg, var(--bg-elevated), var(--bg)); z-index: 10; border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 8px; }
+  .logo { font-family: 'Montserrat', sans-serif; font-weight: 800; font-size: 17px; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .logo span { background: linear-gradient(120deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 
   .topbar-right { display: flex; align-items: center; gap: 10px; }
-  .btn-icon { background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer; transition: color 0.2s; padding: 0; }
-  .btn-icon:active { color: var(--accent); }
-  
-  .sync-badge { background: var(--accent-glow); border: 1px solid var(--accent); color: var(--accent); font-size: 9px; font-weight: 700; padding: 4px 10px; border-radius: 20px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
-  .sync-badge.desynced { border-color: var(--danger); color: var(--danger); background: rgba(255, 71, 87, 0.1); }
-  .dot { width: 5px; height: 5px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 6px var(--accent); }
-  .desynced .dot { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+  .btn-icon { background: none; border: none; color: var(--text-dim); font-size: 17px; cursor: pointer; transition: color 0.15s, transform 0.15s; padding: 4px; border-radius: 8px; }
+  .btn-icon:active { color: var(--accent); transform: scale(0.92); }
 
-  .mini-avatar { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; font-family: 'Montserrat', sans-serif; color: #000; flex-shrink: 0; position: relative; }
-  .host-crown { position: absolute; top: -8px; right: -6px; font-size: 14px; display: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+  .sync-badge { background: var(--accent-glow); border: 1px solid rgba(0,229,255,0.35); color: var(--accent); font-size: 9px; font-weight: 700; padding: 5px 11px; border-radius: 20px; display: flex; align-items: center; gap: 6px; white-space: nowrap; letter-spacing: 0.4px; }
+  .sync-badge.desynced { border-color: rgba(255,77,94,0.4); color: var(--danger); background: rgba(255, 77, 94, 0.1); }
+  .dot { width: 5px; height: 5px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent); }
+  .desynced .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
 
-  .video-container { width: 100%; aspect-ratio: 16/9; background: #000; flex-shrink: 0; position: relative; border-bottom: 1px solid var(--border); max-height: 220px; transition: all 0.3s ease; }
+  .mini-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; font-family: 'Montserrat', sans-serif; color: #05070a; flex-shrink: 0; position: relative; box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3px rgba(255,255,255,0.06); }
+  .host-crown { position: absolute; top: -9px; right: -7px; font-size: 13px; display: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.6)); }
+
+  .video-container { width: 100%; aspect-ratio: 16/9; background: #000; flex-shrink: 0; position: relative; border-bottom: 1px solid var(--border); max-height: 220px; }
   iframe { width: 100%; height: 100%; border: none; position: absolute; top: 0; left: 0; }
   #html5Player { width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: #000; display: none; }
   body.theater-mode .video-container { max-height: 50vh; flex: 0 0 50vh; aspect-ratio: auto; }
 
-  .hls-controls { display: none; flex-direction: column; gap: 6px; padding: 6px 10px 8px; background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .player-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: radial-gradient(circle at 50% 40%, #14161e 0%, #06070a 75%); z-index: 4; text-align: center; padding: 0 20px; }
+  .player-placeholder .ph-icon { font-size: 34px; opacity: 0.5; filter: grayscale(0.3); }
+  .player-placeholder .ph-title { font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 13px; color: var(--text-dim); letter-spacing: 0.5px; }
+  .player-placeholder .ph-sub { font-size: 11px; color: var(--text-faint); }
+
+  .lock-fab { position: absolute; top: 10px; right: 10px; z-index: 16; background: rgba(6,7,10,0.55); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.12); color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .video-container.locked .lock-fab { display: none; }
+  .touch-lock-layer { position: absolute; inset: 0; display: none; align-items: flex-end; justify-content: flex-end; padding: 14px; z-index: 15; }
+  .video-container.locked .touch-lock-layer { display: flex; pointer-events: auto; }
+  .video-container.locked .hls-controls { display: none !important; }
+  .unlock-fab { background: rgba(6,7,10,0.6); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 8px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; font-family: 'Montserrat', sans-serif; }
+
+  .hls-controls { display: none; flex-direction: column; gap: 6px; padding: 7px 12px 9px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .hls-controls.show { display: flex; }
-  .hls-controls select { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; font-size: 10px; font-family: 'Inter', sans-serif; max-width: 90px; }
+  .hls-controls select { background: var(--panel); color: var(--text); border: 1px solid var(--panel-border); border-radius: 7px; padding: 5px 6px; font-size: 10px; font-family: 'Inter', sans-serif; max-width: 88px; }
   .pro-seek-row { display: flex; align-items: center; gap: 8px; }
   .pro-seek-row input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
   .pro-time { font-size: 9px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .pro-btns-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .pro-btn { background: var(--panel); border: 1px solid var(--border); color: var(--text); width: 30px; height: 30px; border-radius: 8px; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .pro-btn:active { border-color: var(--accent); color: var(--accent); }
-  .pro-btn.wide { width: auto; padding: 0 10px; font-size: 10px; font-weight: 700; }
+  .pro-btn { background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); width: 31px; height: 31px; border-radius: 9px; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+  .pro-btn:active { border-color: var(--accent); color: var(--accent); transform: scale(0.94); }
   .pro-volume-row { display: flex; align-items: center; gap: 4px; }
-  .pro-volume-row input[type="range"] { width: 50px; accent-color: var(--accent); height: 4px; }
+  .pro-volume-row input[type="range"] { width: 48px; accent-color: var(--accent); height: 4px; }
   .pro-spacer { flex: 1; }
 
-  .tab-container { flex: 1; overflow-y: auto; background: var(--bg); padding: 12px; padding-bottom: 75px; }
+  .tab-container { flex: 1; overflow-y: auto; background: var(--bg); padding: 14px; padding-bottom: 78px; }
   .tab { display: none; flex-direction: column; height: 100%; }
-  .tab.active { display: flex; animation: fadeIn 0.15s ease-in-out; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .tab.active { display: flex; animation: fadeIn 0.18s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-  h3 { font-family: 'Montserrat', sans-serif; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; font-weight: 700; }
-  .input-group { display: flex; gap: 6px; margin-bottom: 12px; flex-shrink: 0; }
-  input[type="text"] { flex: 1; background: var(--panel); border: 1px solid var(--border); padding: 10px 14px; border-radius: 8px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.15s; width: 100%; }
-  input[type="text"]:focus { border-color: var(--accent); }
+  h3 { font-family: 'Montserrat', sans-serif; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.3px; margin-bottom: 9px; font-weight: 700; }
+  input[type="text"] { flex: 1; background: var(--panel); border: 1px solid var(--panel-border); padding: 12px 15px; border-radius: var(--radius-sm); color: #fff; font-size: 13px; outline: none; transition: border-color 0.15s, box-shadow 0.15s; width: 100%; }
+  input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
   input[type="text"].input-error { border-color: var(--danger); }
   .field-error { color: var(--danger); font-size: 10px; font-weight: 600; margin: -4px 0 8px 2px; display: none; }
   .field-error.show { display: block; }
+  .input-group { display: flex; gap: 8px; margin-bottom: 14px; flex-shrink: 0; }
+  .input-hint { font-size: 10px; color: var(--text-faint); margin: -8px 0 14px 2px; }
 
-  .btn { background: var(--accent); color: #000; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 12px; font-family: 'Montserrat', sans-serif; letter-spacing: 0.5px; }
-  .btn:active { opacity: 0.8; }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
-  .btn-danger { background: rgba(255,71,87,0.12); color: var(--danger); border: 1px solid var(--danger); }
-  .btn-block { width: 100%; padding: 12px; }
-  .btn-sm { padding: 6px 10px; font-size: 10px; }
+  .btn { background: linear-gradient(120deg, var(--accent), #00b8d4); color: #041014; border: none; padding: 12px 18px; border-radius: var(--radius-sm); font-weight: 700; cursor: pointer; font-size: 12px; font-family: 'Montserrat', sans-serif; letter-spacing: 0.4px; transition: transform 0.12s, opacity 0.12s; }
+  .btn:active { opacity: 0.85; transform: scale(0.98); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--panel-border); }
+  .btn-danger { background: rgba(255,77,94,0.12); color: var(--danger); border: 1px solid rgba(255,77,94,0.4); }
+  .btn-block { width: 100%; padding: 13px; }
+  .btn-sm { padding: 7px 11px; font-size: 10px; }
 
-  .segmented { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
-  .segmented button { flex: 1; background: transparent; border: none; color: var(--text-dim); font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 10px; text-transform: uppercase; padding: 8px 0; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
-  .segmented button.active { background: var(--accent); color: #000; }
+  .segmented { display: flex; background: var(--bg-elevated); border: 1px solid var(--panel-border); border-radius: 12px; padding: 3px; margin-bottom: 16px; }
+  .segmented button { flex: 1; background: transparent; border: none; color: var(--text-dim); font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 10px; text-transform: uppercase; padding: 9px 0; border-radius: 9px; cursor: pointer; transition: all 0.15s; }
+  .segmented button.active { background: var(--accent); color: #041014; box-shadow: var(--shadow-md); }
 
-  .active-rooms-box { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; max-height: 130px; overflow-y: auto; }
-  .active-room-row { display: flex; justify-content: space-between; align-items: center; background: var(--bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; }
+  .active-rooms-box { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; max-height: 130px; overflow-y: auto; }
+  .active-room-row { display: flex; justify-content: space-between; align-items: center; background: var(--bg-elevated); padding: 10px 13px; border-radius: var(--radius-sm); margin-bottom: 7px; border: 1px solid var(--panel-border); font-size: 12px; }
   .active-room-row:active { border-color: var(--accent); }
   .room-id-tag { font-family: 'Montserrat', sans-serif; font-weight: 700; color: var(--accent); }
-  .room-count-tag { font-size: 10px; color: var(--text-dim); background: var(--panel); padding: 2px 8px; border-radius: 10px; }
+  .room-count-tag { font-size: 10px; color: var(--text-dim); background: var(--panel); padding: 3px 9px; border-radius: 10px; }
 
-  .chip-row { display: flex; gap: 8px; overflow-x: auto; margin: 12px 0 16px 0; padding-bottom: 4px; scrollbar-width: none; flex-shrink: 0; }
+  .chip-row { display: flex; gap: 8px; overflow-x: auto; margin: 14px 0 18px 0; padding-bottom: 4px; scrollbar-width: none; flex-shrink: 0; }
   .chip-row::-webkit-scrollbar { display: none; }
-  .chip { flex-shrink: 0; background: var(--panel); border: 1px solid var(--border); color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 8px 14px; border-radius: 20px; cursor: pointer; font-family: 'Montserrat', sans-serif; transition: all 0.15s; }
-  .chip.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+  .chip { flex-shrink: 0; background: var(--panel); border: 1px solid var(--panel-border); color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 9px 15px; border-radius: 20px; cursor: pointer; font-family: 'Montserrat', sans-serif; transition: all 0.15s; }
+  .chip.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 14px rgba(0,229,255,0.12); }
 
-  .media-card { display: flex; gap: 10px; margin-bottom: 8px; background: var(--panel); padding: 8px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); align-items: center; }
-  .media-card:active { background: var(--panel-hover); border-color: var(--accent); }
-  .media-thumb { width: 90px; height: 50px; background: #1a1e29; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
-  .media-info { display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
-  .media-title { font-size: 12px; font-weight: 600; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .media-card { display: flex; gap: 11px; margin-bottom: 9px; background: var(--panel); padding: 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--panel-border); align-items: center; transition: all 0.15s; }
+  .media-card:active { background: var(--panel-hover); border-color: var(--accent); transform: scale(0.99); }
+  .media-thumb { width: 92px; height: 52px; background: #1a1e29; border-radius: 8px; object-fit: cover; flex-shrink: 0; box-shadow: var(--shadow-md); }
+  .media-info { display: flex; flex-direction: column; justify-content: center; overflow: hidden; gap: 2px; }
+  .media-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
   .media-sub { font-size: 10px; color: var(--text-dim); }
 
-  .skeleton-card { display: flex; gap: 10px; margin-bottom: 8px; background: var(--panel); padding: 8px; border-radius: 10px; border: 1px solid var(--border); }
-  .skeleton-thumb { width: 90px; height: 50px; border-radius: 6px; flex-shrink: 0; background: var(--border); }
-  .skeleton-lines { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
-  .skeleton-line { height: 8px; border-radius: 4px; background: var(--border); width: 80%; }
+  .skeleton-card { display: flex; gap: 11px; margin-bottom: 9px; background: var(--panel); padding: 9px; border-radius: var(--radius-sm); border: 1px solid var(--panel-border); }
+  .skeleton-thumb { width: 92px; height: 52px; border-radius: 8px; flex-shrink: 0; background: var(--panel-border); animation: pulse 1.3s infinite ease-in-out; }
+  .skeleton-lines { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 7px; }
+  .skeleton-line { height: 8px; border-radius: 4px; background: var(--panel-border); width: 80%; animation: pulse 1.3s infinite ease-in-out; }
   .skeleton-line.short { width: 40%; }
+  @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 
-  .load-more-btn { width: 100%; padding: 10px; margin-top: 4px; background: var(--panel); border: 1px dashed var(--border); color: var(--text-dim); border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; font-family: 'Montserrat', sans-serif; }
+  .load-more-btn { width: 100%; padding: 11px; margin-top: 4px; background: var(--panel); border: 1px dashed var(--panel-border); color: var(--text-dim); border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; cursor: pointer; font-family: 'Montserrat', sans-serif; }
 
-  .empty-state { text-align: center; color: var(--text-dim); margin-top: 40px; font-size: 12px; }
-  .empty-state .icon { font-size: 28px; margin-bottom: 8px; opacity: 0.4; }
-  .empty-state .hint { opacity: 0.7; }
-
-  .convert-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 14px; flex-shrink: 0; }
-  .convert-card input[type="file"] { width: 100%; font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
-  .convert-progress { font-size: 11px; color: var(--text-dim); margin-top: 8px; display: none; }
-  .convert-progress.show { display: block; }
-  .convert-progress.error { color: var(--danger); }
-  .convert-progress.success { color: var(--success); }
-  .link-choice { display: none; }
-  .link-choice.show { display: block; }
-
-  .voice-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; flex-shrink: 0; }
-  .voice-panel-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .voice-panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 12px 13px; margin-bottom: 14px; }
+  .voice-panel-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
   .voice-controls { display: flex; gap: 6px; align-items: center; }
   .voice-status-text { font-size: 9px; color: var(--text-dim); font-weight: 600; margin-right: 2px; }
-  .voice-toggle-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .voice-toggle-btn.on { background: var(--accent); color: #000; border-color: var(--accent); }
-  .voice-toggle-btn.muted { background: rgba(255,71,87,0.15); color: var(--danger); border-color: var(--danger); }
+  .voice-toggle-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--panel-border); background: var(--bg-elevated); color: var(--text-dim); font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .voice-toggle-btn.on { background: linear-gradient(120deg, var(--accent), #00b8d4); color: #041014; border-color: transparent; box-shadow: 0 0 16px rgba(0,229,255,0.25); }
+  .voice-toggle-btn.muted { background: rgba(255,77,94,0.15); color: var(--danger); border-color: rgba(255,77,94,0.4); }
   .voice-toggle-btn.connecting { opacity: 0.6; cursor: wait; }
-  .voice-participants { display: flex; flex-wrap: wrap; gap: 6px; }
-  .voice-chip { display: flex; align-items: center; gap: 5px; background: var(--bg); border: 1px solid var(--border); border-radius: 16px; padding: 4px 8px 4px 4px; font-size: 10px; color: var(--text-dim); }
-  .voice-chip.speaking { border-color: var(--success); box-shadow: 0 0 0 2px rgba(46,213,115,0.15); }
-  .voice-chip .mini-avatar { width: 18px; height: 18px; font-size: 8px; }
-  .voice-chip .speak-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
-  .voice-chip.speaking .speak-dot { background: var(--success); }
-  .voice-empty { font-size: 10px; color: var(--text-dim); opacity: 0.6; }
+  .voice-participants { display: flex; flex-wrap: wrap; gap: 7px; }
+  .voice-chip { display: flex; align-items: center; gap: 6px; background: var(--bg-elevated); border: 1px solid var(--panel-border); border-radius: 18px; padding: 5px 10px 5px 5px; font-size: 10px; color: var(--text-dim); }
+  .voice-chip.speaking { border-color: var(--success); box-shadow: 0 0 0 2px rgba(38,217,122,0.15); }
+  .voice-chip .mini-avatar { width: 20px; height: 20px; font-size: 8px; }
+  .voice-chip .speak-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--panel-border); }
+  .voice-chip.speaking .speak-dot { background: var(--success); box-shadow: 0 0 5px var(--success); }
+  .voice-empty { font-size: 10px; color: var(--text-faint); }
 
-  .chat-box { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 140px; margin-bottom: 6px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-  .chat-msg { display: flex; gap: 6px; align-items: flex-start; }
-  .chat-msg .bubble { background: var(--panel-hover); padding: 8px 12px; border-radius: 8px; font-size: 12px; line-height: 1.4; word-break: break-word; border: 1px solid rgba(255,255,255,0.02); flex: 1; }
+  .chat-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .members-btn { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); padding: 8px 13px; border-radius: 20px; font-size: 11px; font-weight: 700; font-family: 'Montserrat', sans-serif; }
+  .members-btn:active { border-color: var(--accent); color: var(--accent); }
+
+  .chat-box { flex: 1; background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 12px; min-height: 140px; margin-bottom: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .chat-msg { display: flex; gap: 8px; align-items: flex-start; }
+  .chat-msg .bubble { background: var(--bg-elevated); padding: 9px 13px; border-radius: 12px; font-size: 12.5px; line-height: 1.45; word-break: break-word; border: 1px solid var(--border); flex: 1; }
   .chat-user { color: var(--accent); font-weight: 700; font-size: 11px; }
-  .chat-time { font-size: 9px; color: var(--text-dim); margin-left: 6px; font-weight: 500; }
-  .chat-sys { text-align: center; color: var(--text-dim); font-size: 9px; font-weight: 600; margin: 6px 0; letter-spacing: 0.8px; text-transform: uppercase; }
+  .chat-time { font-size: 9px; color: var(--text-faint); margin-left: 6px; font-weight: 500; }
+  .chat-sys { text-align: center; color: var(--text-faint); font-size: 9px; font-weight: 600; margin: 7px 0; letter-spacing: 0.8px; text-transform: uppercase; }
   .chat-sys .sys-time { opacity: 0.6; margin-right: 4px; }
-  .typing-indicator { font-size: 10px; color: var(--text-dim); font-style: italic; padding: 0 4px 6px 4px; height: 14px; }
+  .typing-indicator { font-size: 10px; color: var(--text-dim); font-style: italic; padding: 0 4px 7px 4px; height: 14px; }
   .chat-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 
-  .setting-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .setting-label { font-size: 10px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 2px; }
-  .setting-val { font-size: 13px; font-weight: 700; color: var(--text); font-family: 'Montserrat', sans-serif; }
-  .copy-btn { background: var(--accent-glow); border: 1px solid var(--accent); color: var(--accent); padding: 5px 10px; border-radius: 6px; font-size: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; flex-shrink: 0; }
+  .setting-tile { background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 11px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .setting-label { font-size: 10px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 3px; }
+  .setting-val { font-size: 14px; font-weight: 700; color: var(--text); font-family: 'Montserrat', sans-serif; }
+  .copy-btn { background: var(--accent-glow); border: 1px solid rgba(0,229,255,0.4); color: var(--accent); padding: 6px 11px; border-radius: 7px; font-size: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; flex-shrink: 0; }
 
-  .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; display: flex; justify-content: space-around; background: var(--bg); border-top: 1px solid var(--border); padding: 8px 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); z-index: 20; }
-  .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-dim); font-size: 8px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.8px; width: 25%; font-family: 'Montserrat', sans-serif; background: none; border: none; }
+  .queue-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .empty-state { text-align: center; color: var(--text-faint); margin-top: 44px; font-size: 12px; }
+
+  .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; display: flex; justify-content: space-around; background: linear-gradient(0deg, var(--bg-elevated), var(--bg)); border-top: 1px solid var(--border); padding: 9px 0; padding-bottom: max(9px, env(safe-area-inset-bottom)); z-index: 20; }
+  .nav-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-faint); font-size: 8px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.8px; width: 25%; font-family: 'Montserrat', sans-serif; background: none; border: none; transition: color 0.15s; }
   .nav-item.active { color: var(--accent); }
-  .nav-item.active::after { content: ''; width: 14px; height: 2px; background: var(--accent); border-radius: 2px; margin-top: 2px; box-shadow: 0 0 5px var(--accent); }
-  .nav-icon { font-size: 16px; margin-bottom: 1px; }
-  .unread-badge { position: absolute; top: 2px; right: 28%; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid var(--bg); display: none; }
+  .nav-item.active::after { content: ''; width: 16px; height: 2px; background: var(--accent); border-radius: 2px; margin-top: 2px; box-shadow: 0 0 6px var(--accent); }
+  .nav-icon { font-size: 17px; margin-bottom: 1px; }
+  .unread-badge { position: absolute; top: 2px; right: 28%; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid var(--bg-elevated); display: none; }
 
-  #loginModal { position: fixed; inset: 0; background: rgba(7, 8, 12, 0.96); backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
-  .modal-card { width: 100%; max-width: 340px; background: var(--panel); padding: 24px 20px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 20px 40px rgba(0,0,0,0.6); max-height: 90vh; overflow-y: auto; }
+  #loginModal { position: fixed; inset: 0; background: rgba(4, 5, 8, 0.97); backdrop-filter: blur(10px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 18px; }
+  .modal-card { width: 100%; max-width: 340px; background: var(--panel); padding: 26px 22px; border-radius: 20px; border: 1px solid var(--panel-border); box-shadow: var(--shadow-lg); max-height: 90vh; overflow-y: auto; }
 
-  #toastHost { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
-  .toast { background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 11px; font-weight: 600; padding: 8px 14px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); opacity: 0; transform: translateY(-8px); transition: all 0.2s; white-space: nowrap; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(4,5,8,0.75); backdrop-filter: blur(6px); z-index: 90; display: none; align-items: flex-end; justify-content: center; }
+  .modal-overlay.show { display: flex; }
+  .modal-panel { width: 100%; max-width: 480px; background: var(--panel); border-radius: 20px 20px 0 0; border: 1px solid var(--panel-border); border-bottom: none; padding: 20px; max-height: 82vh; overflow-y: auto; box-shadow: var(--shadow-lg); animation: slideUp 0.2s ease-out; }
+  @keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .modal-header h3 { margin: 0; font-size: 13px; }
+
+  .member-row { display: flex; align-items: center; gap: 11px; background: var(--bg-elevated); padding: 11px 13px; border-radius: var(--radius-sm); margin-bottom: 8px; border: 1px solid var(--border); }
+  .member-name { flex: 1; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .member-tag { font-size: 9px; color: var(--text-faint); font-weight: 600; }
+
+  #toastHost { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+  .toast { background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); font-size: 11px; font-weight: 600; padding: 9px 15px; border-radius: 18px; box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(-8px); transition: all 0.2s; white-space: nowrap; }
   .toast.success { border-color: var(--success); color: var(--success); }
   .toast.error { border-color: var(--danger); color: var(--danger); }
   .toast.warning { border-color: var(--warning); color: var(--warning); }
@@ -178,9 +204,9 @@
 <!-- Login Modal -->
 <div id="loginModal">
   <div class="modal-card">
-    <div style="text-align: center; margin-bottom: 18px;">
-      <h1 class="logo" style="font-size: 22px; justify-content: center;">SYNC<span>TUBE</span></h1>
-      <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">Watch together, in perfect sync</p>
+    <div style="text-align: center; margin-bottom: 20px;">
+      <h1 class="logo" style="font-size: 23px; justify-content: center;">SYNC<span>TUBE</span></h1>
+      <p style="color: var(--text-dim); font-size: 11px; margin-top: 5px;">Watch together, in perfect sync</p>
     </div>
 
     <div class="segmented">
@@ -196,7 +222,7 @@
       <div class="field-error" id="roomError">Enter the room code.</div>
     </div>
 
-    <button class="btn btn-block" id="enterBtn" onclick="joinApp()" style="margin-top: 4px;">Create Room</button>
+    <button class="btn btn-block" id="enterBtn" onclick="joinApp()" style="margin-top: 6px;">Create Room</button>
 
     <div class="active-rooms-box">
       <h3>Active Public Rooms</h3>
@@ -218,12 +244,23 @@
   </div>
 </div>
 
-<div class="video-container">
+<div class="video-container" id="videoContainer">
   <div id="player"></div>
   <video id="html5Player" playsinline></video>
+
+  <div class="player-placeholder" id="playerPlaceholder">
+    <div class="ph-icon">🎬</div>
+    <div class="ph-title">Nothing Playing</div>
+    <div class="ph-sub">Search YouTube or paste a link to get started</div>
+  </div>
+
+  <button class="lock-fab" id="lockToggleBtn" onclick="toggleTouchLock()" title="Lock controls">🔒</button>
+  <div class="touch-lock-layer" id="touchLockLayer">
+    <button class="unlock-fab" onclick="toggleTouchLock()">🔓 Tap to Unlock</button>
+  </div>
 </div>
 
-<!-- Pro HTML5 control bar, only shown while HLS/raw (non-YouTube) source is active -->
+<!-- Pro HTML5 control bar, shown while a direct/HLS (non-YouTube) source is active -->
 <div class="hls-controls" id="hlsControls">
   <div class="pro-seek-row">
     <span class="pro-time" id="proTimeCurrent">0:00</span>
@@ -231,9 +268,9 @@
     <span class="pro-time" id="proTimeDuration">0:00</span>
   </div>
   <div class="pro-btns-row">
-    <button class="pro-btn" id="proSkipBackBtn" onclick="skipBy(-10)" title="Back 10s">⏪</button>
+    <button class="pro-btn" onclick="skipBy(-10)" title="Back 10s">⏪</button>
     <button class="pro-btn" id="proPlayPauseBtn" onclick="togglePlayPause()" title="Play/Pause">▶</button>
-    <button class="pro-btn" id="proSkipFwdBtn" onclick="skipBy(10)" title="Forward 10s">⏩</button>
+    <button class="pro-btn" onclick="skipBy(10)" title="Forward 10s">⏩</button>
     <div class="pro-volume-row">
       <span style="font-size:11px;">🔊</span>
       <input type="range" id="proVolumeBar" min="0" max="100" value="100" oninput="onVolumeChange(this.value)">
@@ -241,7 +278,6 @@
     <div class="pro-spacer"></div>
     <select id="qualitySelect" onchange="onQualityChange(this.value)" title="Quality"><option value="-1">Auto</option></select>
     <select id="audioTrackSelect" onchange="onAudioTrackChange(this.value)" title="Audio track"></select>
-    <select id="subtitleSelect" onchange="onSubtitleChange(this.value)" title="Subtitles"><option value="-1">CC Off</option></select>
     <button class="pro-btn" onclick="togglePip()" title="Picture in Picture">⧉</button>
     <button class="pro-btn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
   </div>
@@ -251,32 +287,11 @@
 
   <!-- SEARCH TAB -->
   <div id="tab-search" class="tab active">
-
-    <div class="convert-card">
-      <h3>Upload & Convert (HTML5 / HLS)</h3>
-      <input type="file" id="convertFileInput" accept="video/*">
-      <button class="btn btn-block" id="convertBtn" onclick="startConversion()">Upload &amp; Convert</button>
-      <div class="convert-progress" id="convertProgress"></div>
-    </div>
-
-    <div class="convert-card">
-      <h3>Add Video by Link</h3>
-      <input type="text" id="linkInput" placeholder="Direct video link (.mp4, .webm, .m3u8)">
-      <button class="btn btn-block" id="linkAddBtn" onclick="checkLink()">Add Video</button>
-      <div class="link-choice" id="linkChoice">
-        <div style="font-size:11px; color: var(--text-dim); margin: 8px 0;">How should this play?</div>
-        <div style="display:flex; gap:8px;">
-          <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="playRawLink()">▶ Play Raw (Instant)</button>
-          <button class="btn btn-sm" style="flex:1;" onclick="convertLink()">⚙ Convert Multi-Track</button>
-        </div>
-      </div>
-      <div class="convert-progress" id="linkProgress"></div>
-    </div>
-
     <div class="input-group">
-      <input type="text" id="searchInput" placeholder="Search YouTube or paste URL...">
-      <button class="btn" onclick="searchVideo()" style="padding: 10px 14px;">Search</button>
+      <input type="text" id="searchInput" placeholder="Search YouTube or paste a video link...">
+      <button class="btn" onclick="handleUniversalSearch()" style="padding: 10px 16px;">Go</button>
     </div>
+    <div class="input-hint">Paste a direct .mp4/.m3u8/cloud link to play it instantly, or type anything else to search YouTube.</div>
 
     <div class="chip-row" id="categoryChips">
       <div class="chip active" data-cat="10" onclick="selectCategory('10', this)">Music</div>
@@ -293,32 +308,21 @@
 
   <!-- PLAYLIST TAB -->
   <div id="tab-playlist" class="tab">
-    <div class="queue-header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-      <h3>Active Queue</h3>
+    <div class="queue-header-row">
+      <h3 style="margin-bottom:0;">Active Queue</h3>
       <button class="btn btn-ghost btn-sm" id="clearQueueBtn" onclick="clearQueue()" style="display:none;">Clear</button>
     </div>
     <div id="queueList">
-      <div style="text-align: center; color: var(--text-dim); margin-top: 40px; font-size: 12px;">Queue is currently empty</div>
+      <div class="empty-state">Queue is currently empty</div>
     </div>
   </div>
 
   <!-- CHAT TAB -->
   <div id="tab-chat" class="tab">
-    <div class="voice-panel">
-      <div class="voice-panel-top">
-        <h3 style="margin-bottom:0;">Voice Chat</h3>
-        <div class="voice-controls">
-          <span class="voice-status-text" id="voiceStatusText"></span>
-          <button class="voice-toggle-btn" id="voiceJoinBtn" onclick="toggleVoice()" title="Join voice">🎙</button>
-          <button class="voice-toggle-btn" id="voiceMuteBtn" onclick="toggleMute()" title="Mute" style="display:none;">🔊</button>
-        </div>
-      </div>
-      <div class="voice-participants" id="voiceParticipants">
-        <span class="voice-empty">No one is in voice chat yet</span>
-      </div>
+    <div class="chat-header-row">
+      <h3 style="margin-bottom:0;">Room Broadcast (<span id="userCount">1</span> Online)</h3>
+      <button class="members-btn" onclick="openMembersModal()">👥 Members</button>
     </div>
-
-    <h3 style="text-align: center;">Room Broadcast (<span id="userCount">1</span> Online)</h3>
     <div class="chat-box" id="chatBox"></div>
     <div class="typing-indicator" id="typingIndicator"></div>
     <div class="input-group" style="margin-bottom: 0;">
@@ -346,10 +350,37 @@
         <div class="host-crown" id="hostCrownSettings">👑</div>
       </div>
     </div>
-    <h3 style="margin-top: 6px;">Session</h3>
-    <button class="btn btn-danger btn-block" onclick="leaveRoom()" style="padding: 10px;">Leave Room</button>
+    <h3 style="margin-top: 8px;">Session</h3>
+    <button class="btn btn-danger btn-block" onclick="leaveRoom()" style="padding: 12px;">Leave Room</button>
   </div>
 
+</div>
+
+<!-- Members Modal (includes Voice Chat) -->
+<div class="modal-overlay" id="membersModal" onclick="if(event.target===this) closeMembersModal()">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h3>Room Members</h3>
+      <button class="btn-icon" onclick="closeMembersModal()">✕</button>
+    </div>
+
+    <div class="voice-panel">
+      <div class="voice-panel-top">
+        <h3 style="margin-bottom:0;">Voice Chat</h3>
+        <div class="voice-controls">
+          <span class="voice-status-text" id="voiceStatusText"></span>
+          <button class="voice-toggle-btn" id="voiceJoinBtn" onclick="toggleVoice()" title="Join voice">🎙</button>
+          <button class="voice-toggle-btn" id="voiceMuteBtn" onclick="toggleMute()" title="Mute" style="display:none;">🔊</button>
+        </div>
+      </div>
+      <div class="voice-participants" id="voiceParticipants">
+        <span class="voice-empty">No one is in voice chat yet</span>
+      </div>
+    </div>
+
+    <h3>Everyone Here</h3>
+    <div id="membersList"></div>
+  </div>
 </div>
 
 <!-- Bottom Navigation Bar -->
@@ -373,10 +404,10 @@
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
 <script>
   const YT_API_KEY = "AIzaSyDRWvwOTQOxlEHemge7s8g3e6YWZim0c88";
-  const AVATAR_PALETTE = ["#00f0ff", "#2ed573", "#ffa502", "#ff6b81", "#a29bfe", "#54a0ff", "#ff7f50", "#7bed9f"];
+  const AVATAR_PALETTE = ["#00e5ff", "#26d97a", "#ffb020", "#ff6b81", "#a29bfe", "#54a0ff", "#ff7f50", "#7bed9f"];
   const VOICE_CLIP_MS = 500;
-  const VOICE_MAX_QUEUED_CLIPS = 4; 
-  const REMOTE_ECHO_SUPPRESS_MS = 900; 
+  const VOICE_MAX_QUEUED_CLIPS = 4;
+  const REMOTE_ECHO_SUPPRESS_MS = 900;
 
   let socket, player;
   let remoteUpdateSuppressedUntil = 0;
@@ -385,12 +416,12 @@
   let cachedQueueData = [];
   let videoRegistry = {};
   let loginMode = 'create';
-  
-  let isHost = false; 
+
+  let isHost = false;
+  let hasContent = false;
 
   let typingTimer = null;
   let typingUsers = new Set();
-  let unreadMessages = 0;
 
   let currentCategory = '10';
   let nextTrendingToken = null;
@@ -403,20 +434,15 @@
   let voiceMuted = false;
   let mediaStream = null;
   let voiceRecordTimer = null;
-  let voiceParticipantsMap = {};   
-  let speakingResetTimers = {};    
-  let voicePlaybackQueues = {};    
-  let voicePlayingNow = {};        
+  let voiceParticipantsMap = {};
+  let speakingResetTimers = {};
+  let voicePlaybackQueues = {};
+  let voicePlayingNow = {};
 
-  // ---------------------------------------------------------------------
-  // Source abstraction: 'youtube' (YT iframe) or 'hls' (html5 video + hls.js)
-  // ---------------------------------------------------------------------
-  let activeSourceType = 'youtube';
+  let activeSourceType = 'none'; // 'none' | 'youtube' | 'raw'
   let html5El = null;
   let hlsInstance = null;
-  let currentSubtitles = [];
   let proSeekDragging = false;
-  let pendingLinkUrl = null;
 
   const tempSocket = io();
   tempSocket.on('active-rooms', (rooms) => renderActiveRoomsList(rooms));
@@ -465,24 +491,20 @@
     el.style.background = avatarColor(name);
     el.textContent = initials(name);
   }
-  
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
   function formatChatMessage(str) {
     const safeStr = document.createElement('div');
     safeStr.textContent = str;
     let html = safeStr.innerHTML;
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    return html.replace(urlRegex, function(url) {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-link">${url}</a>`;
-    });
+    return html.replace(urlRegex, (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-link">${url}</a>`);
   }
-  
   function formatTime(ts) {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-  function escapeHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
   }
 
   function switchTab(tabId, el) {
@@ -490,7 +512,6 @@
     document.getElementById('tab-' + tabId).classList.add('active');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     el.classList.add('active');
-
     if (tabId === 'chat') {
       document.getElementById('chatBadge').style.display = 'none';
       const box = document.getElementById('chatBox');
@@ -498,9 +519,11 @@
     }
   }
 
-  function toggleTheater() {
-    document.body.classList.toggle('theater-mode');
-  }
+  function toggleTheater() { document.body.classList.toggle('theater-mode'); }
+  function toggleTouchLock() { document.getElementById('videoContainer').classList.toggle('locked'); }
+
+  function openMembersModal() { document.getElementById('membersModal').classList.add('show'); }
+  function closeMembersModal() { document.getElementById('membersModal').classList.remove('show'); }
 
   function generateRoomCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -509,9 +532,7 @@
     return code;
   }
 
-  if (username) {
-    document.getElementById('nameInput').value = username;
-  }
+  if (username) document.getElementById('nameInput').value = username;
 
   function setLoginMode(mode) {
     loginMode = mode;
@@ -578,9 +599,7 @@
   }
 
   ['nameInput', 'roomInput'].forEach(id => {
-    document.getElementById(id).addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') joinApp();
-    });
+    document.getElementById(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') joinApp(); });
   });
 
   function leaveRoom() {
@@ -600,7 +619,6 @@
 
     socket.on('room-info', (data) => {
       document.getElementById('userCount').innerText = data.count;
-      
       isHost = data.isAdmin;
       const display = isHost ? 'block' : 'none';
       document.getElementById('hostCrownTop').style.display = display;
@@ -613,21 +631,18 @@
       }
     });
 
+    socket.on('members-update', (list) => renderMembers(list));
+
     // Late-joiner catch-up: server computes drift-adjusted position for us.
     socket.on('initial-sync', (data) => {
-      if (data.sourceType === 'hls' && data.hlsUrl) {
-        loadHlsSource(data.hlsUrl, data.subtitles || [], data.time, data.playbackState === 'playing');
+      if (data.sourceType === 'youtube' && data.videoId) {
+        switchToYoutubeView();
+        ytLoad(data.videoId, data.time);
+        if (data.playbackState !== 'playing') {
+          setTimeout(() => { if (player && player.pauseVideo) player.pauseVideo(); }, 400);
+        }
       } else if (data.sourceType === 'raw' && data.rawUrl) {
         loadRawSource(data.rawUrl, data.time, data.playbackState === 'playing');
-      } else if (data.sourceType === 'youtube' && data.videoId) {
-        suppressLocalEchoFor(REMOTE_ECHO_SUPPRESS_MS);
-        switchToYoutubeView();
-        const tryLoad = () => {
-          if (!player || typeof player.loadVideoById !== 'function') { setTimeout(tryLoad, 300); return; }
-          player.loadVideoById(data.videoId, data.time);
-          if (data.playbackState !== 'playing') player.pauseVideo();
-        };
-        tryLoad();
       }
     });
 
@@ -639,7 +654,6 @@
     socket.on('chat-message', (msg) => {
       const box = document.getElementById('chatBox');
       const tsObj = msg.timestamp || Date.now();
-      
       const isAtBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 40;
 
       if (msg.type === 'system') {
@@ -649,7 +663,7 @@
       } else {
         const color = avatarColor(msg.user);
         box.insertAdjacentHTML('beforeend', `<div class="chat-msg">
-          <div class="mini-avatar" style="background:${color}; width:22px; height:22px; font-size:9px;">${initials(msg.user)}</div>
+          <div class="mini-avatar" style="background:${color}; width:24px; height:24px; font-size:9px;">${initials(msg.user)}</div>
           <div class="bubble">
             <div><span class="chat-user">${escapeHtml(msg.user)}</span> <span class="chat-time">${formatTime(tsObj)}</span></div>
             <div style="margin-top:2px;">${formatChatMessage(msg.text)}</div>
@@ -658,18 +672,12 @@
       }
 
       const isChatActive = document.getElementById('tab-chat').classList.contains('active');
-      if (!isChatActive) {
-        document.getElementById('chatBadge').style.display = 'block';
-      }
-
-      if (isAtBottom || !isChatActive) {
-        box.scrollTop = box.scrollHeight;
-      }
+      if (!isChatActive) document.getElementById('chatBadge').style.display = 'block';
+      if (isAtBottom || !isChatActive) box.scrollTop = box.scrollHeight;
     });
 
     socket.on('typing', (data) => {
-      if (data.isTyping) typingUsers.add(data.user);
-      else typingUsers.delete(data.user);
+      if (data.isTyping) typingUsers.add(data.user); else typingUsers.delete(data.user);
       renderTypingIndicator();
     });
 
@@ -678,15 +686,7 @@
 
       if (data.type === 'change') {
         switchToYoutubeView();
-        const tryLoad = () => {
-          if (!player || typeof player.loadVideoById !== 'function') { setTimeout(tryLoad, 300); return; }
-          player.loadVideoById(data.videoId);
-        };
-        tryLoad();
-        return;
-      }
-      if (data.type === 'change-hls') {
-        loadHlsSource(data.hlsUrl, data.subtitles || [], 0, true);
+        ytLoad(data.videoId);
         return;
       }
       if (data.type === 'change-raw') {
@@ -699,7 +699,7 @@
         if (data.type === 'play') player.playVideo();
         if (data.type === 'pause') player.pauseVideo();
         if (data.type === 'seek') { player.seekTo(data.time, true); player.playVideo(); }
-      } else {
+      } else if (activeSourceType === 'raw') {
         if (!html5El) return;
         if (data.type === 'play') html5El.play();
         if (data.type === 'pause') html5El.pause();
@@ -710,9 +710,7 @@
     socket.on('voice-participants', (list) => {
       const next = {};
       list.forEach(u => { next[u] = voiceParticipantsMap[u] || false; });
-      Object.keys(voiceParticipantsMap).forEach(u => {
-        if (!(u in next)) cleanupVoiceUser(u);
-      });
+      Object.keys(voiceParticipantsMap).forEach(u => { if (!(u in next)) cleanupVoiceUser(u); });
       voiceParticipantsMap = next;
       renderVoiceParticipants();
     });
@@ -738,30 +736,21 @@
     else { badge.classList.add('desynced'); text.textContent = 'RECONNECTING'; }
   }
 
-  function suppressLocalEchoFor(ms) {
-    remoteUpdateSuppressedUntil = Date.now() + ms;
-  }
-  function isLocalEchoSuppressed() {
-    return Date.now() < remoteUpdateSuppressedUntil;
-  }
+  function suppressLocalEchoFor(ms) { remoteUpdateSuppressedUntil = Date.now() + ms; }
+  function isLocalEchoSuppressed() { return Date.now() < remoteUpdateSuppressedUntil; }
 
   document.getElementById('chatInput').addEventListener('input', () => {
     if (!socket) return;
     socket.emit('typing', { roomId, user: username, isTyping: true });
     clearTimeout(typingTimer);
-    typingTimer = setTimeout(() => {
-      socket.emit('typing', { roomId, user: username, isTyping: false });
-    }, 1500);
+    typingTimer = setTimeout(() => socket.emit('typing', { roomId, user: username, isTyping: false }), 1500);
   });
 
   function renderTypingIndicator() {
     const el = document.getElementById('typingIndicator');
-    if (typingUsers.size === 0) {
-      el.innerText = '';
-    } else {
-      const names = Array.from(typingUsers).join(', ');
-      el.innerText = `${names} ${typingUsers.size > 1 ? 'are' : 'is'} typing...`;
-    }
+    if (typingUsers.size === 0) { el.innerText = ''; return; }
+    const names = Array.from(typingUsers).join(', ');
+    el.innerText = `${names} ${typingUsers.size > 1 ? 'are' : 'is'} typing...`;
   }
 
   function sendMsg() {
@@ -773,10 +762,34 @@
       inputField.value = '';
     }
   }
-  document.getElementById('chatInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendMsg();
-  });
+  document.getElementById('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMsg(); });
 
+  // ---------------------------------------------------------------------
+  // Members panel + host transfer
+  // ---------------------------------------------------------------------
+  function renderMembers(list) {
+    const box = document.getElementById('membersList');
+    if (!list || list.length === 0) { box.innerHTML = `<div class="empty-state">No one here yet</div>`; return; }
+    box.innerHTML = list.map(m => {
+      const isMe = socket && m.id === socket.id;
+      return `<div class="member-row">
+        <div class="mini-avatar" style="background:${avatarColor(m.username)};">${initials(m.username)}
+          <div class="host-crown" style="${m.isHost ? 'display:block;' : ''}">👑</div>
+        </div>
+        <div class="member-name">${escapeHtml(m.username)} ${isMe ? '<span class="member-tag">(You)</span>' : ''}</div>
+        ${(isHost && !isMe) ? `<button class="btn btn-ghost btn-sm" onclick="transferHost('${m.id}')">Make Host</button>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function transferHost(targetId) {
+    socket.emit('transfer-host', { roomId, targetId });
+    toast('Host transferred', 'success');
+  }
+
+  // ---------------------------------------------------------------------
+  // YouTube player
+  // ---------------------------------------------------------------------
   function loadYouTubeApi() {
     const tag = document.createElement('script');
     tag.src = "https://www.youtube.com/iframe_api";
@@ -785,21 +798,29 @@
 
   function onYouTubeIframeAPIReady() {
     player = new YT.Player('player', {
-      videoId: 'dQw4w9WgXcQ',
       playerVars: { 'playsinline': 1 },
       events: { 'onStateChange': onPlayerStateChange }
     });
   }
 
+  function ytLoad(videoId, seekSeconds) {
+    const attempt = () => {
+      if (!player || typeof player.loadVideoById !== 'function') { setTimeout(attempt, 250); return; }
+      if (typeof seekSeconds === 'number' && seekSeconds > 0.5) player.loadVideoById(videoId, seekSeconds);
+      else player.loadVideoById(videoId);
+    };
+    attempt();
+  }
+
   function onPlayerStateChange(event) {
     if (activeSourceType !== 'youtube') return;
     if (isLocalEchoSuppressed()) return;
-    
+
     if (!isHost) {
       if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.PLAYING) {
         toast('Only the Host (👑) can pause or seek the video.', 'warning');
       }
-      return; 
+      return;
     }
 
     if (event.data === YT.PlayerState.PLAYING) {
@@ -808,19 +829,21 @@
       socket.emit('video-command', { roomId, type: 'pause' });
     } else if (event.data === YT.PlayerState.ENDED) {
       socket.emit('pop-queue', roomId);
-      setTimeout(() => {
-        if (cachedQueueData.length > 0) {
-          queueVideoById(cachedQueueData[0].id, true);
-        }
-      }, 500);
+      setTimeout(() => { if (cachedQueueData.length > 0) playItemNow(cachedQueueData[0]); }, 500);
     }
   }
 
   // ---------------------------------------------------------------------
-  // Player view switching (YouTube iframe <-> HTML5/HLS)
+  // Player view switching
   // ---------------------------------------------------------------------
+  function hidePlaceholder() {
+    hasContent = true;
+    document.getElementById('playerPlaceholder').style.display = 'none';
+  }
+
   function switchToYoutubeView() {
     activeSourceType = 'youtube';
+    hidePlaceholder();
     document.getElementById('player').style.display = 'block';
     document.getElementById('html5Player').style.display = 'none';
     document.getElementById('hlsControls').classList.remove('show');
@@ -828,67 +851,14 @@
     if (html5El) { html5El.pause(); html5El.removeAttribute('src'); }
   }
 
-  function switchToHlsView() {
-    activeSourceType = 'hls';
-    document.getElementById('player').style.display = 'none';
-    document.getElementById('html5Player').style.display = 'block';
-    document.getElementById('hlsControls').classList.add('show');
-    if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
-  }
-
-  function loadHlsSource(url, subtitles, seekTime, autoplay) {
-    switchToHlsView();
-    currentSubtitles = subtitles || [];
-
-    // Clear old <track> elements and attach new subtitle tracks natively.
-    Array.from(html5El.querySelectorAll('track')).forEach(t => t.remove());
-    currentSubtitles.forEach((s) => {
-      const track = document.createElement('track');
-      track.kind = 'subtitles';
-      track.label = s.title || s.language;
-      track.srclang = s.language || 'und';
-      track.src = url.replace(/master\.m3u8$/, s.file);
-      html5El.appendChild(track);
-    });
-    populateSubtitleSelect(currentSubtitles);
-
-    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-
-    if (Hls.isSupported()) {
-      hlsInstance = new Hls();
-      hlsInstance.loadSource(url);
-      hlsInstance.attachMedia(html5El);
-      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-        populateQualitySelect(hlsInstance.levels);
-        populateAudioTrackSelect(hlsInstance.audioTracks);
-        html5El.currentTime = seekTime || 0;
-        if (autoplay) html5El.play().catch(() => {});
-      });
-      hlsInstance.on(Hls.Events.ERROR, (evt, data) => {
-        if (data.fatal) toast('Playback error: ' + data.type, 'error');
-      });
-    } else if (html5El.canPlayType('application/vnd.apple.mpegurl')) {
-      html5El.src = url;
-      html5El.addEventListener('loadedmetadata', () => {
-        html5El.currentTime = seekTime || 0;
-        if (autoplay) html5El.play().catch(() => {});
-      }, { once: true });
-    } else {
-      toast('HLS playback is not supported in this browser', 'error');
-    }
-  }
-
-  // Direct file/m3u8 link — either adaptive (if the link is itself an .m3u8
-  // with its own renditions) or a flat single-quality mp4/webm.
   function loadRawSource(url, seekTime, autoplay) {
     activeSourceType = 'raw';
+    hidePlaceholder();
     document.getElementById('player').style.display = 'none';
     document.getElementById('html5Player').style.display = 'block';
     document.getElementById('hlsControls').classList.add('show');
     if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-    Array.from(html5El.querySelectorAll('track')).forEach(t => t.remove());
-    document.getElementById('subtitleSelect').innerHTML = '<option value="-1">CC Off</option>';
 
     const isM3u8 = /\.m3u8($|\?)/i.test(url);
     if (isM3u8 && Hls.isSupported()) {
@@ -901,10 +871,12 @@
         html5El.currentTime = seekTime || 0;
         if (autoplay) html5El.play().catch(() => {});
       });
+      hlsInstance.on(Hls.Events.ERROR, (evt, data) => { if (data.fatal) toast('Playback error: ' + data.type, 'error'); });
     } else {
       document.getElementById('qualitySelect').innerHTML = '<option value="-1">Source</option>';
       document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
       html5El.src = url;
+      html5El.onerror = () => toast('Could not load that link — check it points directly to a video file', 'error');
       html5El.addEventListener('loadedmetadata', () => {
         html5El.currentTime = seekTime || 0;
         if (autoplay) html5El.play().catch(() => {});
@@ -912,8 +884,21 @@
     }
   }
 
+  function populateQualitySelect(levels) {
+    const sel = document.getElementById('qualitySelect');
+    sel.innerHTML = '<option value="-1">Auto</option>' + levels.map((lvl, i) => `<option value="${i}">${lvl.height}p</option>`).join('');
+  }
+  function onQualityChange(val) { if (hlsInstance) hlsInstance.currentLevel = parseInt(val, 10); }
+
+  function populateAudioTrackSelect(tracks) {
+    const sel = document.getElementById('audioTrackSelect');
+    if (!tracks || tracks.length <= 1) { sel.innerHTML = '<option value="0">Default Audio</option>'; return; }
+    sel.innerHTML = tracks.map((t, i) => `<option value="${i}">${t.name || t.lang || ('Track ' + (i + 1))}</option>`).join('');
+  }
+  function onAudioTrackChange(val) { if (hlsInstance) hlsInstance.audioTrack = parseInt(val, 10); }
+
   // ---------------------------------------------------------------------
-  // Pro control bar — bound once; works for both hls and raw source types.
+  // Pro control bar
   // ---------------------------------------------------------------------
   function initProControls() {
     html5El.addEventListener('timeupdate', () => {
@@ -934,19 +919,18 @@
       if (dur) html5El.currentTime = (seekBar.value / 1000) * dur;
     });
 
-    // Host controls mirror the YT flow: play/pause/seek broadcast to the room.
     html5El.onplay = () => {
-      if (isLocalEchoSuppressed() || activeSourceType === 'youtube') return;
+      if (isLocalEchoSuppressed() || activeSourceType !== 'raw') return;
       if (!isHost) { toast('Only the Host (👑) can pause or seek the video.', 'warning'); return; }
       socket.emit('video-command', { roomId, type: 'seek', time: html5El.currentTime });
     };
     html5El.onpause = () => {
-      if (isLocalEchoSuppressed() || activeSourceType === 'youtube') return;
+      if (isLocalEchoSuppressed() || activeSourceType !== 'raw') return;
       if (!isHost) return;
       socket.emit('video-command', { roomId, type: 'pause' });
     };
     html5El.onseeked = () => {
-      if (isLocalEchoSuppressed() || activeSourceType === 'youtube' || !isHost) return;
+      if (isLocalEchoSuppressed() || activeSourceType !== 'raw' || !isHost) return;
       socket.emit('video-command', { roomId, type: 'seek', time: html5El.currentTime });
     };
   }
@@ -973,12 +957,12 @@
       socket.emit('video-command', { roomId, type: 'seek', time: t });
       return;
     }
-    html5El.currentTime = Math.max(0, Math.min(html5El.duration || Infinity, html5El.currentTime + delta));
+    if (activeSourceType === 'raw' && html5El) {
+      html5El.currentTime = Math.max(0, Math.min(html5El.duration || Infinity, html5El.currentTime + delta));
+    }
   }
 
-  function onVolumeChange(val) {
-    if (html5El) html5El.volume = val / 100;
-  }
+  function onVolumeChange(val) { if (html5El) html5El.volume = val / 100; }
 
   function togglePip() {
     if (document.pictureInPictureElement) { document.exitPictureInPicture(); return; }
@@ -988,171 +972,78 @@
   }
 
   function toggleFullscreen() {
-    const container = document.querySelector('.video-container');
-    if (document.fullscreenElement) { document.exitFullscreen(); }
-    else if (container.requestFullscreen) { container.requestFullscreen().catch(() => {}); }
+    const container = document.getElementById('videoContainer');
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (container.requestFullscreen) container.requestFullscreen().catch(() => {});
   }
 
   // ---------------------------------------------------------------------
-  // Add-by-link flow: validate, then let the user choose raw vs convert.
+  // Universal search / add flow
   // ---------------------------------------------------------------------
-  function checkLink() {
-    const val = document.getElementById('linkInput').value.trim();
-    const progressEl = document.getElementById('linkProgress');
-    progressEl.className = 'convert-progress';
-    document.getElementById('linkChoice').classList.remove('show');
-    if (!val) { toast('Paste a video link first', 'warning'); return; }
-
-    fetch('/api/check-link', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: val })
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) { progressEl.className = 'convert-progress show error'; progressEl.textContent = data.error; return; }
-        pendingLinkUrl = val;
-        document.getElementById('linkChoice').classList.add('show');
-      })
-      .catch(() => { progressEl.className = 'convert-progress show error'; progressEl.textContent = 'Could not validate link'; });
+  function extractYoutubeId(str) {
+    let m = str.match(/[?&]v=([a-zA-Z0-9_-]{11})/); if (m) return m[1];
+    m = str.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/); if (m) return m[1];
+    m = str.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/); if (m) return m[1];
+    return null;
+  }
+  function isDirectMediaUrl(str) {
+    if (!/^https?:\/\//i.test(str)) return false;
+    if (/youtube\.com|youtu\.be/i.test(str)) return false;
+    return true; // any other http(s) link is treated as a direct/cloud media link
   }
 
-  function playRawLink() {
-    if (!pendingLinkUrl) return;
-    if (!isHost) { toast('Only the host can change the source.', 'warning'); return; }
-    loadRawSource(pendingLinkUrl, 0, true);
-    socket.emit('video-command', { roomId, type: 'change-raw', url: pendingLinkUrl });
-    document.getElementById('linkChoice').classList.remove('show');
-    toast('Playing raw link for the room', 'success');
+  async function handleUniversalSearch() {
+    const inputField = document.getElementById('searchInput');
+    const raw = inputField.value.trim();
+    if (!raw) return;
+
+    const ytId = extractYoutubeId(raw);
+    if (ytId) {
+      selectVideo({ id: ytId, title: 'Pasted YouTube Video', channel: 'YouTube', thumb: `https://img.youtube.com/vi/${ytId}/mqdefault.jpg`, type: 'youtube' });
+      inputField.value = '';
+      return;
+    }
+
+    if (isDirectMediaUrl(raw)) {
+      let name = 'Direct Link';
+      try { name = decodeURIComponent(raw.split('/').pop().split('?')[0]) || name; } catch (e) {}
+      selectVideo({ url: raw, title: name, channel: 'Direct Link', thumb: '', type: 'raw' });
+      inputField.value = '';
+      return;
+    }
+
+    browseMode = 'search';
+    lastSearchQuery = raw;
+    nextSearchToken = null;
+    document.getElementById('searchHeading').innerText = 'Searching...';
+    showSkeletons();
+    await runSearch(raw, null, false);
+  }
+  document.getElementById('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleUniversalSearch(); });
+
+  // Adds to the shared queue (always — fixes the old sync bug) and, if the
+  // caller is host, plays it immediately for the whole room.
+  function selectVideo(item) {
+    const key = item.id || item.url;
+    videoRegistry[key] = item;
+    socket.emit('add-to-queue', { roomId, video: item });
+    if (isHost) playItemNow(item);
+    else toast('Added to queue — waiting for host to play', 'success');
+  }
+  function selectVideoById(key) {
+    const item = videoRegistry[key];
+    if (item) selectVideo(item);
   }
 
-  function convertLink() {
-    if (!pendingLinkUrl) return;
-    if (!isHost) { toast('Only the host can convert a source.', 'warning'); return; }
-    const progressEl = document.getElementById('linkProgress');
-    progressEl.className = 'convert-progress show';
-    progressEl.textContent = 'Fetching & converting…';
-    document.getElementById('linkChoice').classList.remove('show');
-
-    fetch('/api/convert-from-url', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: pendingLinkUrl })
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        pollConvertStatus(data.jobId, progressEl);
-      })
-      .catch(err => { progressEl.className = 'convert-progress show error'; progressEl.textContent = 'Failed: ' + err.message; });
-  }
-
-  function populateQualitySelect(levels) {
-    const sel = document.getElementById('qualitySelect');
-    sel.innerHTML = '<option value="-1">Auto Quality</option>' +
-      levels.map((lvl, i) => `<option value="${i}">${lvl.height}p</option>`).join('');
-  }
-  function onQualityChange(val) {
-    if (hlsInstance) hlsInstance.currentLevel = parseInt(val, 10);
-  }
-
-  function populateAudioTrackSelect(tracks) {
-    const sel = document.getElementById('audioTrackSelect');
-    if (!tracks || tracks.length <= 1) { sel.innerHTML = '<option value="0">Default Audio</option>'; return; }
-    sel.innerHTML = tracks.map((t, i) => `<option value="${i}">${t.name || t.lang || ('Track ' + (i + 1))}</option>`).join('');
-  }
-  function onAudioTrackChange(val) {
-    if (hlsInstance) hlsInstance.audioTrack = parseInt(val, 10);
-  }
-
-  function populateSubtitleSelect(subs) {
-    const sel = document.getElementById('subtitleSelect');
-    sel.innerHTML = '<option value="-1">Subtitles Off</option>' +
-      subs.map((s, i) => `<option value="${i}">${s.title || s.language}</option>`).join('');
-  }
-  function onSubtitleChange(val) {
-    const idx = parseInt(val, 10);
-    Array.from(html5El.textTracks).forEach((tt, i) => {
-      tt.mode = (i === idx) ? 'showing' : 'hidden';
-    });
-  }
-
-  // ---------------------------------------------------------------------
-  // Upload & Convert flow
-  // ---------------------------------------------------------------------
-  function startConversion() {
-    const fileInput = document.getElementById('convertFileInput');
-    const file = fileInput.files[0];
-    const progressEl = document.getElementById('convertProgress');
-    if (!file) { toast('Choose a video file first', 'warning'); return; }
-
-    document.getElementById('convertBtn').disabled = true;
-    progressEl.className = 'convert-progress show';
-    progressEl.textContent = 'Uploading…';
-
-    const formData = new FormData();
-    formData.append('video', file);
-
-    fetch('/api/convert', { method: 'POST', body: formData })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        pollConvertStatus(data.jobId, progressEl);
-      })
-      .catch(err => {
-        progressEl.className = 'convert-progress show error';
-        progressEl.textContent = 'Upload failed: ' + err.message;
-        document.getElementById('convertBtn').disabled = false;
-      });
-  }
-
-  function pollConvertStatus(jobId, progressEl) {
-    const poll = () => {
-      fetch('/api/convert/status/' + jobId)
-        .then(r => r.json())
-        .then(job => {
-          if (job.status === 'done') {
-            progressEl.className = 'convert-progress show success';
-            progressEl.textContent = 'Conversion complete — playing for the room.';
-            document.getElementById('convertBtn').disabled = false;
-
-            if (isHost) {
-              socket.emit('video-command', { roomId, type: 'change-hls', hlsUrl: job.masterUrl, subtitles: job.subtitles || [] });
-            }
-            loadHlsSource(job.masterUrl, job.subtitles || [], 0, true);
-          } else if (job.status === 'error') {
-            progressEl.className = 'convert-progress show error';
-            progressEl.textContent = 'Conversion failed: ' + job.error;
-            document.getElementById('convertBtn').disabled = false;
-          } else {
-            progressEl.textContent = 'Converting… (' + job.status + (job.lastTimeMark ? ', ' + job.lastTimeMark : '') + ')';
-            setTimeout(poll, 2000);
-          }
-        })
-        .catch(() => setTimeout(poll, 3000));
-    };
-    poll();
-  }
-
-  function queueVideo(vidId) {
-    const item = videoRegistry[vidId] || { id: vidId, title: "Custom Media", channel: "YouTube", thumb: `https://img.youtube.com/vi/${vidId}/mqdefault.jpg` };
-    if (activeSourceType !== 'youtube' || !player.getVideoUrl().includes('watch')) {
-      queueVideoById(item.id, true);
+  function playItemNow(item) {
+    if (!isHost) { toast('Only the host can start playback.', 'warning'); return; }
+    if (item.type === 'raw') {
+      loadRawSource(item.url, 0, true);
+      socket.emit('video-command', { roomId, type: 'change-raw', url: item.url });
     } else {
-      socket.emit('add-to-queue', { roomId, video: item });
-      toast('Added to queue');
-    }
-  }
-
-  function queueVideoById(vidId, forcePlay = false) {
-    if (forcePlay && !isHost) {
-      toast('Only the host can force-play. Added to queue instead.', 'warning');
-      forcePlay = false;
-    }
-
-    if (forcePlay) {
       switchToYoutubeView();
-      player.loadVideoById(vidId);
-      socket.emit('video-command', { roomId, type: 'change', videoId: vidId });
-    } else {
-      const item = videoRegistry[vidId] || { id: vidId, title: "Custom Media", channel: "YouTube", thumb: `https://img.youtube.com/vi/${vidId}/mqdefault.jpg` };
-      socket.emit('add-to-queue', { roomId, video: item });
+      ytLoad(item.id);
+      socket.emit('video-command', { roomId, type: 'change', videoId: item.id });
     }
   }
 
@@ -1167,18 +1058,20 @@
   function renderQueue(queue) {
     const list = document.getElementById('queueList');
     if (!queue || queue.length === 0) {
-      list.innerHTML = `<div style="text-align: center; color: var(--text-dim); margin-top: 40px; font-size: 12px;">Queue is currently empty</div>`;
+      list.innerHTML = `<div class="empty-state">Queue is currently empty</div>`;
       return;
     }
     let html = '';
     queue.forEach(item => {
-      videoRegistry[item.id] = item;
+      const key = item.id || item.url;
+      videoRegistry[key] = item;
+      const thumb = item.thumb || '';
       html += `
-      <div class="media-card" onclick="queueVideoById('${item.id}', true)">
-        <img class="media-thumb" src="${item.thumb}" loading="lazy">
+      <div class="media-card" onclick="selectVideoById('${key}')">
+        ${thumb ? `<img class="media-thumb" src="${thumb}" loading="lazy">` : `<div class="media-thumb" style="display:flex;align-items:center;justify-content:center;font-size:18px;">🔗</div>`}
         <div class="media-info">
           <div class="media-title">${escapeHtml(item.title)}</div>
-          <div class="media-sub">${escapeHtml(item.channel)} • Tap to play</div>
+          <div class="media-sub">${escapeHtml(item.channel || '')} • Tap to play</div>
         </div>
       </div>`;
     });
@@ -1198,38 +1091,11 @@
     for (let i = 0; i < count; i++) {
       html += `<div class="skeleton-card">
         <div class="skeleton-thumb"></div>
-        <div class="skeleton-lines">
-          <div class="skeleton-line"></div>
-          <div class="skeleton-line short"></div>
-        </div>
+        <div class="skeleton-lines"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
       </div>`;
     }
     document.getElementById('searchResultsContainer').innerHTML = html;
     document.getElementById('loadMoreBtn').style.display = 'none';
-  }
-
-  async function searchVideo() {
-    const inputField = document.getElementById('searchInput');
-    const input = inputField.value.trim();
-    if (!input) return;
-
-    let id = null;
-    if (input.includes('v=')) id = input.split('v=')[1].substring(0, 11);
-    else if (input.includes('youtu.be/')) id = input.split('youtu.be/')[1].substring(0, 11);
-
-    if (id) {
-      queueVideoById(id, true);
-      inputField.value = '';
-      toast('Playing pasted URL');
-      return;
-    }
-
-    browseMode = 'search';
-    lastSearchQuery = input;
-    nextSearchToken = null;
-    document.getElementById('searchHeading').innerText = 'Searching...';
-    showSkeletons();
-    await runSearch(input, null, false);
   }
 
   async function runSearch(query, pageToken, append) {
@@ -1275,11 +1141,8 @@
     const btn = document.getElementById('loadMoreBtn');
     btn.disabled = true;
     btn.textContent = 'Loading...';
-    if (browseMode === 'search' && nextSearchToken) {
-      runSearch(lastSearchQuery, nextSearchToken, true);
-    } else if (browseMode === 'trending' && nextTrendingToken) {
-      fetchTrending(currentCategory, nextTrendingToken, true);
-    }
+    if (browseMode === 'search' && nextSearchToken) runSearch(lastSearchQuery, nextSearchToken, true);
+    else if (browseMode === 'trending' && nextTrendingToken) fetchTrending(currentCategory, nextTrendingToken, true);
   }
 
   function renderVideoList(items, headingText, append) {
@@ -1290,11 +1153,9 @@
         const title = item.snippet.title;
         const channel = item.snippet.channelTitle;
         const thumb = item.snippet.thumbnails.medium.url;
-
-        videoRegistry[vidId] = { id: vidId, title: title, channel: channel, thumb: thumb };
-
+        videoRegistry[vidId] = { id: vidId, title, channel, thumb, type: 'youtube' };
         html += `
-        <div class="media-card" onclick="queueVideo('${vidId}')">
+        <div class="media-card" onclick="selectVideoById('${vidId}')">
           <img class="media-thumb" src="${thumb}" loading="lazy">
           <div class="media-info">
             <div class="media-title">${escapeHtml(title)}</div>
@@ -1303,23 +1164,22 @@
         </div>`;
       });
       const container = document.getElementById('searchResultsContainer');
-      if (append) container.insertAdjacentHTML('beforeend', html);
-      else container.innerHTML = html;
+      if (append) container.insertAdjacentHTML('beforeend', html); else container.innerHTML = html;
       document.getElementById('searchHeading').innerText = headingText;
     } else if (!append) {
-      document.getElementById('searchResultsContainer').innerHTML = `<div style="text-align: center; color: var(--text-dim); margin-top: 40px; font-size: 12px;">No media found</div>`;
+      document.getElementById('searchResultsContainer').innerHTML = `<div class="empty-state">No media found</div>`;
       document.getElementById('searchHeading').innerText = 'No results';
     }
   }
 
-  function voiceSupported() {
-    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
-  }
+  // ---------------------------------------------------------------------
+  // Voice chat
+  // ---------------------------------------------------------------------
+  function voiceSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
 
   async function toggleVoice() {
     if (voiceActive) { stopVoice(); return; }
     if (voiceConnecting) return;
-
     if (!voiceSupported()) { toast('Voice chat is not supported in this browser', 'error'); return; }
 
     voiceConnecting = true;
@@ -1328,9 +1188,7 @@
     document.getElementById('voiceStatusText').textContent = 'Connecting…';
 
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (err) {
       voiceConnecting = false;
       joinBtn.classList.remove('connecting');
@@ -1367,17 +1225,15 @@
         if (!voiceMuted && chunks.length && socket) {
           const blob = new Blob(chunks, { type: mimeType });
           const reader = new FileReader();
-          reader.onloadend = () => { socket.emit('voice-chunk', { roomId, user: username, data: reader.result }); };
+          reader.onloadend = () => socket.emit('voice-chunk', { roomId, user: username, data: reader.result });
           reader.readAsDataURL(blob);
         }
         if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 0);
       };
       recorder.onerror = () => { if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 200); };
-
       recorder.start();
       setTimeout(() => { if (recorder.state !== 'inactive') recorder.stop(); }, VOICE_CLIP_MS);
     };
-
     recordOneClip();
   }
 
@@ -1414,7 +1270,7 @@
                           Object.keys(voicePlayingNow).some(u => u !== username && voicePlayingNow[u]);
     if (activeSourceType === 'youtube' && player && typeof player.setVolume === 'function') {
       player.setVolume(anyoneTalking ? 15 : 100);
-    } else if (activeSourceType === 'hls' && html5El) {
+    } else if (activeSourceType === 'raw' && html5El) {
       html5El.volume = anyoneTalking ? 0.15 : 1.0;
     }
   }
@@ -1424,7 +1280,6 @@
     voiceParticipantsMap[user] = true;
     renderVoiceParticipants();
     updateAudioDucking();
-
     clearTimeout(speakingResetTimers[user]);
     speakingResetTimers[user] = setTimeout(() => {
       voiceParticipantsMap[user] = false;
@@ -1445,17 +1300,11 @@
     if (voicePlayingNow[user]) return;
     const queue = voicePlaybackQueues[user];
     if (!queue || queue.length === 0) return;
-
     voicePlayingNow[user] = true;
     updateAudioDucking();
-
     const clipUrl = queue.shift();
     const audio = new Audio(clipUrl);
-    const advance = () => {
-      voicePlayingNow[user] = false;
-      updateAudioDucking();
-      drainVoiceQueue(user);
-    };
+    const advance = () => { voicePlayingNow[user] = false; updateAudioDucking(); drainVoiceQueue(user); };
     audio.onended = advance;
     audio.onerror = advance;
     audio.play().catch(advance);
@@ -1472,10 +1321,7 @@
   function renderVoiceParticipants() {
     const el = document.getElementById('voiceParticipants');
     const names = Object.keys(voiceParticipantsMap);
-    if (names.length === 0) {
-      el.innerHTML = `<span class="voice-empty">No one is in voice chat yet</span>`;
-      return;
-    }
+    if (names.length === 0) { el.innerHTML = `<span class="voice-empty">No one is in voice chat yet</span>`; return; }
     el.innerHTML = names.map(name => {
       const speaking = voiceParticipantsMap[name];
       return `<div class="voice-chip ${speaking ? 'speaking' : ''}">
@@ -1487,9 +1333,7 @@
   }
 
   function copyRoomId() {
-    navigator.clipboard.writeText(roomId).then(() => {
-      toast('Room code copied: ' + roomId, 'success');
-    });
+    navigator.clipboard.writeText(roomId).then(() => toast('Room code copied: ' + roomId, 'success'));
   }
 </script>
 </body>
