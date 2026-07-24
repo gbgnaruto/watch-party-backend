@@ -464,12 +464,12 @@ io.on('connection', (socket) => {
         }
     });
 
+    // BUG FIX #2 APPLIED HERE: Allow anyone to add to the playlist, and broadcast it to everyone.
     socket.on('update_playlist', (data) => {
         const room = rooms[data.roomId];
-        const user = room?.users.find(u => u.socketId === socket.id);
-        if (room && user && (user.isHost || user.isCoHost)) {
+        if (room) {
             room.playlist = data.playlist;
-            socket.to(data.roomId).emit('sync_playlist', room.playlist);
+            io.to(data.roomId).emit('sync_playlist', room.playlist);
         }
     });
 
@@ -496,7 +496,13 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('chat_message', (data) => { if (rooms[data.roomId]) io.to(data.roomId).emit('chat_message', data); });
+    // Chat broadcast logic 
+    socket.on('chat_message', (data) => { 
+        if (rooms[data.roomId]) {
+            io.to(data.roomId).emit('chat_message', data); 
+        }
+    });
+    
     socket.on('voice_join', (data) => { socket.to(data.roomId).emit('voice_user_joined', { socketId: socket.id }); });
     socket.on('webrtc_offer', (data) => { io.to(data.target).emit('webrtc_offer', { sender: socket.id, sdp: data.sdp }); });
     socket.on('webrtc_answer', (data) => { io.to(data.target).emit('webrtc_answer', { sender: socket.id, sdp: data.sdp }); });
