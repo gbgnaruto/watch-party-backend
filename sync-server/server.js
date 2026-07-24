@@ -205,6 +205,25 @@ async function runConversionJob(jobId, inputPath) {
   }
 }
 
+// Extracts a safe file extension from a URL's pathname only (never the query
+// string or the full URL), and only accepts alphanumeric extensions of
+// reasonable length. This prevents a URL like "https://x.com/A" (no real
+// extension) from producing a garbage value such as "com/A" via naive
+// string splitting — a slash in the "extension" turns `${jobId}.${ext}`
+// into a nested path that path.join() silently accepts, causing a
+// confusing ENOENT when the download stream tries to write to a
+// non-existent subdirectory.
+function safeExtensionFromUrl(url) {
+  const FALLBACK = 'mp4';
+  try {
+    const pathname = new URL(url).pathname;
+    const match = pathname.match(/\.([a-zA-Z0-9]{2,5})$/);
+    return match ? match[1].toLowerCase() : FALLBACK;
+  } catch (e) {
+    return FALLBACK;
+  }
+}
+
 app.post('/api/convert-from-url', async (req, res) => {
   const { url } = req.body || {};
   if (!url) return res.status(400).json({ error: 'Missing url' });
@@ -213,7 +232,7 @@ app.post('/api/convert-from-url', async (req, res) => {
   jobs[jobId] = { status: 'queued' };
   res.json({ jobId });
 
-  const ext = (url.split('?')[0].split('.').pop() || 'mp4').slice(0, 5);
+  const ext = safeExtensionFromUrl(url);
   const destPath = path.join(UPLOAD_DIR, `${jobId}.${ext}`);
   try {
     jobs[jobId].status = 'downloading';
