@@ -26,6 +26,7 @@ app.use('/hls', express.static(HLS_DIR));
 // Optional cloud storage (S3 / Cloudflare R2). Falls back to local disk
 // serving when S3_BUCKET isn't set — fine for dev, but local disk is
 // ephemeral on Render, so set these for anything beyond quick testing.
+// Requires `npm i @aws-sdk/client-s3 @aws-sdk/lib-storage` if you turn it on.
 // ---------------------------------------------------------------------------
 const S3_ENABLED = !!process.env.S3_BUCKET;
 let s3Client = null;
@@ -203,6 +204,8 @@ async function runConversionJob(jobId, inputPath) {
   } catch (err) {
     jobs[jobId].status = 'error';
     jobs[jobId].error = err.message;
+    // Don't leave a half-finished output directory sitting on disk.
+    fs.rm(outDir, { recursive: true, force: true }, () => {});
   } finally {
     fs.rm(inputPath, { force: true }, () => {});
   }
@@ -280,7 +283,7 @@ io.on('connection', (socket) => {
     if (!roomsData[roomId]) {
       roomsData[roomId] = {
         count: 0, admin: socket.id, members: {}, queue: [], voiceUsers: new Set(),
-        sourceType: 'none', currentVideoId: null, currentRawUrl: null,
+        sourceType: 'none', currentVideoId: null, currentRawUrl: null, currentRawTitle: null,
         currentVideoTime: 0, playbackState: 'paused', lastUpdatedAt: Date.now()
       };
     }
@@ -292,7 +295,7 @@ io.on('connection', (socket) => {
 
     socket.emit('initial-sync', {
       sourceType: room.sourceType, videoId: room.currentVideoId, rawUrl: room.currentRawUrl,
-      time: currentPlaybackTime(room), playbackState: room.playbackState
+      title: room.currentRawTitle, time: currentPlaybackTime(room), playbackState: room.playbackState
     });
 
     io.to(roomId).emit('chat-message', { type: 'system', text: `${username.toUpperCase()} JOINED THE ROOM`, timestamp: Date.now() });
@@ -306,11 +309,11 @@ io.on('connection', (socket) => {
     if (data.type === 'pause') { room.currentVideoTime = currentPlaybackTime(room); room.playbackState = 'paused'; room.lastUpdatedAt = Date.now(); }
     if (data.type === 'seek') { room.currentVideoTime = data.time; room.lastUpdatedAt = Date.now(); room.playbackState = 'playing'; }
     if (data.type === 'change') {
-      room.sourceType = 'youtube'; room.currentVideoId = data.videoId; room.currentRawUrl = null;
+      room.sourceType = 'youtube'; room.currentVideoId = data.videoId; room.currentRawUrl = null; room.currentRawTitle = null;
       room.currentVideoTime = 0; room.playbackState = 'playing'; room.lastUpdatedAt = Date.now();
     }
     if (data.type === 'change-raw') {
-      room.sourceType = 'raw'; room.currentRawUrl = data.url; room.currentVideoId = null;
+      room.sourceType = 'raw'; room.currentRawUrl = data.url; room.currentRawTitle = data.title || null; room.currentVideoId = null;
       room.currentVideoTime = 0; room.playbackState = 'playing'; room.lastUpdatedAt = Date.now();
     }
 
