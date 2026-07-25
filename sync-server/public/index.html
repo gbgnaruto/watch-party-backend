@@ -107,6 +107,19 @@
   .video-container.locked.show-unlock .lock-layer { display: flex; }
   .unlock-fab { display: flex; align-items: center; gap: 6px; background: rgba(10,12,17,0.55); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.18); color: #fff; padding: 10px 18px; border-radius: 24px; font-size: 12px; font-weight: 700; font-family: 'Montserrat', sans-serif; }
 
+  /* Gesture OSD (volume / brightness / seek swipe indicator) */
+  .osd-gesture { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 16; background: rgba(10,12,17,0.78); border: 1px solid rgba(255,255,255,0.14); border-radius: 14px; padding: 10px 16px; display: none; align-items: center; gap: 10px; backdrop-filter: blur(6px); pointer-events: none; }
+  .osd-gesture.show { display: flex; }
+  .osd-gesture .material-icons { font-size: 20px; color: #fff; }
+  .osd-bar-track { width: 84px; height: 4px; background: rgba(255,255,255,0.25); border-radius: 2px; overflow: hidden; }
+  .osd-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+  .osd-gesture .osd-val { font-size: 11px; font-weight: 700; color: #fff; font-family: 'Montserrat', sans-serif; min-width: 32px; text-align: right; }
+
+  /* Double-tap skip ripple */
+  .skip-ripple { position: absolute; width: 80px; height: 80px; border-radius: 50%; background: rgba(0,229,255,0.1); border: 2px solid rgba(0,229,255,0.35); display: flex; align-items: flex-end; justify-content: center; animation: skipRippleAnim 0.6s ease forwards; pointer-events: none; z-index: 16; }
+  .skip-ripple span { font-family: 'Montserrat', sans-serif; font-size: 10px; color: var(--accent); font-weight: 700; padding-bottom: 6px; }
+  @keyframes skipRippleAnim { 0% { opacity: 1; transform: scale(0.6); } 100% { opacity: 0; transform: scale(1.6); } }
+
   /* ---------------- Tabs / general layout ---------------- */
   .tab-container { flex: 1; overflow-y: auto; background: var(--bg); padding: 14px; padding-bottom: 78px; }
   .tab { display: none; flex-direction: column; height: 100%; }
@@ -148,6 +161,10 @@
 
   .media-card { display: flex; gap: 11px; margin-bottom: 9px; background: var(--panel); padding: 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--panel-border); align-items: center; transition: all 0.15s; }
   .media-card:active { background: var(--panel-hover); border-color: var(--accent); transform: scale(0.99); }
+  .media-card.dragging { opacity: .4; }
+  .media-card.drag-over { border-color: var(--accent); background: rgba(0,229,255,.06); }
+  .dh { color: var(--text-dim); padding: 4px 6px; cursor: grab; display: flex; align-items: center; flex-shrink: 0; touch-action: none; }
+  .dh .material-icons { font-size: 18px; }
   .media-thumb { width: 92px; height: 52px; background: #1a1e29; border-radius: 8px; object-fit: cover; flex-shrink: 0; box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center; color: var(--text-faint); }
   .media-info { display: flex; flex-direction: column; justify-content: center; overflow: hidden; gap: 2px; }
   .media-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
@@ -300,6 +317,7 @@
   </div>
 
   <div class="tap-zone" id="tapZone"></div>
+  <div class="osd-gesture" id="osdGesture"><span class="material-icons" id="osdIcon">volume_up</span><div class="osd-bar-track"><div class="osd-bar-fill" id="osdBarFill" style="width:100%"></div></div><span class="osd-val" id="osdVal">100%</span></div>
 
   <div class="player-overlay" id="playerOverlay">
     <div class="overlay-top">
@@ -340,7 +358,9 @@
     <div class="audio-menu-title">Quality</div>
     <select id="qualitySelect" onchange="onQualityChange(this.value)"><option value="-1">Auto</option></select>
     <div class="audio-menu-title" style="margin-top:10px;">Audio Track</div>
-    <select id="audioTrackSelect" onchange="onAudioTrackChange(this.value)"><option value="0">Default</option></select>
+    <select id="audioTrackSelect" onchange="onAudioTrackChangeUnified(this.value)"><option value="0">Default</option></select>
+    <div class="audio-menu-title" style="margin-top:10px;">Captions</div>
+    <select id="captionSelect" onchange="onCaptionChange(this.value)"><option value="-1">N/A</option></select>
   </div>
 
   <div class="lock-layer" id="lockLayer">
@@ -535,6 +555,24 @@
   let hideTimer = null;
   let unlockHideTimer = null;
 
+  // Gesture engine state (swipe volume/brightness/seek, double-tap skip)
+  let gBrightness = 1.0;
+  const gTouch = { active: false, startX: 0, startY: 0, type: null, startVal: 0, startPos: 0, startBright: 1, tapTimer: null, tapCount: 0, tapX: 0, tapY: 0 };
+
+  // Native HTML5 multi-track audio (for direct MP4/MKV files with embedded tracks — distinct from HLS variant audio)
+  let audioPollHandle = null, audioPollCount = 0;
+
+  // Native HTML5 caption/subtitle tracks (server-extracted .vtt sidecars + any embedded tracks)
+  let ccPollHandle = null, ccPollCount = 0;
+
+  // Queue drag-and-drop reorder (host only)
+  let dragSrcIndex = null;
+  let touchDragEl = null, touchDragIdx = null, touchDragClone = null, touchDragY = 0;
+
+  function haptic(intensity) {
+    try { if (navigator.vibrate) navigator.vibrate(intensity === 'medium' ? 20 : intensity === 'strong' ? 40 : 8); } catch (e) {}
+  }
+
 
   // FIX 1: UNIFIED SOCKET LIFECYCLE
   // The socket connects immediately on page load, eliminating the race condition.
@@ -571,7 +609,7 @@
       ytLoad(data.videoId, data.time);
       if (data.playbackState !== 'playing') setTimeout(() => { if (player && player.pauseVideo) player.pauseVideo(); }, 400);
     } else if (data.sourceType === 'raw' && data.rawUrl) {
-      loadRawSource(data.rawUrl, data.title || 'Direct Link', data.time, data.playbackState === 'playing');
+      loadRawSource(data.rawUrl, data.title || 'Direct Link', data.time, data.playbackState === 'playing', data.subtitles);
     }
   });
 
@@ -609,7 +647,7 @@
   socket.on('sync-video', (data) => {
     suppressLocalEchoFor(REMOTE_ECHO_SUPPRESS_MS);
     if (data.type === 'change') { switchToYoutubeView(); ytLoad(data.videoId); return; }
-    if (data.type === 'change-raw') { loadRawSource(data.url, data.title || 'Direct Link', 0, true); return; }
+    if (data.type === 'change-raw') { loadRawSource(data.url, data.title || 'Direct Link', 0, true, data.subtitles); return; }
 
     if (activeSourceType === 'youtube') {
       if (!player) return;
@@ -986,9 +1024,10 @@
     if (html5El) { html5El.pause(); html5El.removeAttribute('src'); }
     document.getElementById('qualitySelect').innerHTML = '<option value="-1">N/A</option>';
     document.getElementById('audioTrackSelect').innerHTML = '<option value="0">N/A</option>';
+    document.getElementById('captionSelect').innerHTML = '<option value="-1">N/A</option>';
   }
 
-  function loadRawSource(url, title, seekTime, autoplay) {
+  function loadRawSource(url, title, seekTime, autoplay, subtitles) {
     activeSourceType = 'raw';
     currentRawUrlGlobal = url;
     document.getElementById('overlayTitle').textContent = title || 'Direct Link';
@@ -997,6 +1036,22 @@
     document.getElementById('html5Player').style.display = 'block';
     if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+
+    // Reset native audio-track select state before this load; hls.js or the
+    // native-track poll below will repopulate it as appropriate.
+    document.getElementById('audioTrackSelect').dataset.native = '0';
+
+    // Attach any server-extracted .vtt subtitle sidecars (or embedded tracks
+    // will simply appear via textTracks on their own) before playback starts.
+    attachSubtitleTracks(url, subtitles);
+
+    // Poll for native embedded audio tracks and captions once the element has
+    // actual media data — covers direct MP4/MKV files with multiple tracks.
+    html5El.addEventListener('loadeddata', () => {
+      fixAudioTracks();
+      startNativeAudioTrackPoll();
+      startCaptionPoll();
+    }, { once: true });
 
     // If autoplay is blocked by the browser, fall back to a muted autoplay attempt
     // (allowed almost everywhere) and prompt the user to unmute, instead of failing silently.
@@ -1068,16 +1123,276 @@
   function onQualityChange(val) { if (hlsInstance) hlsInstance.currentLevel = parseInt(val, 10); }
   function populateAudioTrackSelect(tracks) {
     const sel = document.getElementById('audioTrackSelect');
+    sel.dataset.native = '0'; // these are hls.js variant-stream audio tracks, not embedded file tracks
     if (!tracks || tracks.length <= 1) { sel.innerHTML = '<option value="0">Default Audio</option>'; return; }
-    sel.innerHTML = tracks.map((t, i) => `<option value="${i}">${t.name || t.lang || ('Track ' + (i + 1))}</option>`).join('');
+    sel.innerHTML = tracks.map((t, i) => `<option value="${i}">${escapeHtml(t.name || t.lang || ('Track ' + (i + 1)))}</option>`).join('');
   }
   function onAudioTrackChange(val) { if (hlsInstance) hlsInstance.audioTrack = parseInt(val, 10); }
+
+  // Routes audio-track changes to the right API: hls.js variant-stream switching
+  // (adaptive HLS renditions) or the native HTML5 audioTracks API (embedded
+  // multi-audio tracks in a direct MP4/MKV file — a different mechanism entirely).
+  function onAudioTrackChangeUnified(val) {
+    const sel = document.getElementById('audioTrackSelect');
+    if (sel.dataset.native === '1') {
+      const idx = parseInt(val, 10);
+      if (html5El?.audioTracks) {
+        for (let i = 0; i < html5El.audioTracks.length; i++) html5El.audioTracks[i].enabled = (i === idx);
+      }
+      toast('Audio track switched', 'success');
+    } else {
+      onAudioTrackChange(val);
+    }
+  }
   function toggleAudioMenu() { document.getElementById('audioMenu').classList.toggle('show'); }
+
+  // ---------------------------------------------------------------------
+  // Native HTML5 multi-track audio (audioTracks API). This covers direct
+  // MP4/MKV files with multiple embedded audio streams — separate from the
+  // hls.js variant-stream switching above, which only applies to HLS.
+  // Browsers can silently enable more than one track at once, which mixes
+  // or mutes audio; fixAudioTracks() ensures exactly one is ever enabled.
+  // ---------------------------------------------------------------------
+  function fixAudioTracks() {
+    const tracks = html5El?.audioTracks;
+    if (!tracks || tracks.length === 0) return;
+    let enabledCount = 0;
+    for (let i = 0; i < tracks.length; i++) if (tracks[i].enabled) enabledCount++;
+    if (enabledCount !== 1) {
+      for (let i = 0; i < tracks.length; i++) tracks[i].enabled = (i === 0);
+    }
+  }
+
+  function startNativeAudioTrackPoll() {
+    clearTimeout(audioPollHandle);
+    audioPollCount = 0;
+    pollNativeAudioTracks();
+  }
+
+  function pollNativeAudioTracks() {
+    audioPollCount++;
+    const tracks = html5El?.audioTracks;
+    if (tracks && tracks.length > 1) {
+      fixAudioTracks();
+      populateNativeAudioTrackSelect(tracks);
+      return;
+    }
+    if (audioPollCount < 12) {
+      audioPollHandle = setTimeout(pollNativeAudioTracks, audioPollCount < 5 ? 400 : 900);
+    }
+  }
+
+  function populateNativeAudioTrackSelect(tracks) {
+    if (!tracks || tracks.length <= 1) return; // leave whatever hls.js already populated untouched
+    const sel = document.getElementById('audioTrackSelect');
+    let html = '';
+    for (let i = 0; i < tracks.length; i++) {
+      const label = tracks[i].label || tracks[i].language || `Track ${i + 1}`;
+      html += `<option value="${i}"${tracks[i].enabled ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+    }
+    sel.innerHTML = html;
+    sel.dataset.native = '1';
+  }
+
+  // ---------------------------------------------------------------------
+  // Captions / CC — surfaces the .vtt sidecar subtitles the server already
+  // extracts during HLS conversion (previously extracted but never shown),
+  // plus any subtitle tracks embedded directly in a raw file.
+  // ---------------------------------------------------------------------
+  function attachSubtitleTracks(masterUrl, subtitles) {
+    if (!html5El) return;
+    Array.from(html5El.querySelectorAll('track')).forEach(t => t.remove());
+    if (!subtitles || subtitles.length === 0) return;
+    const base = masterUrl.replace(/master\.m3u8(\?.*)?$/, '');
+    subtitles.forEach((s, i) => {
+      const track = document.createElement('track');
+      track.kind = 'subtitles';
+      track.label = s.title || s.language || `Track ${i + 1}`;
+      track.srclang = (s.language || 'und').slice(0, 2);
+      track.src = base + s.file;
+      html5El.appendChild(track);
+    });
+  }
+
+  function startCaptionPoll() {
+    clearTimeout(ccPollHandle);
+    ccPollCount = 0;
+    pollCaptions();
+  }
+
+  function pollCaptions() {
+    ccPollCount++;
+    const tracks = html5El?.textTracks;
+    let real = 0;
+    if (tracks) for (let i = 0; i < tracks.length; i++) if (tracks[i].kind !== 'metadata' && tracks[i].kind !== 'chapters') real++;
+    if (real > 0) { populateCaptionSelect(tracks); return; }
+    if (ccPollCount < 10) ccPollHandle = setTimeout(pollCaptions, ccPollCount < 3 ? 400 : 900);
+    else { const sel = document.getElementById('captionSelect'); if (sel) sel.innerHTML = '<option value="-1">N/A</option>'; }
+  }
+
+  function populateCaptionSelect(tracks) {
+    const sel = document.getElementById('captionSelect');
+    if (!sel) return;
+    let html = '<option value="-1">Off</option>';
+    for (let i = 0; i < tracks.length; i++) {
+      if (tracks[i].kind === 'metadata' || tracks[i].kind === 'chapters') continue;
+      const label = tracks[i].label || tracks[i].language || `Track ${i + 1}`;
+      html += `<option value="${i}"${tracks[i].mode === 'showing' ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+    }
+    sel.innerHTML = html;
+  }
+
+  function onCaptionChange(val) {
+    const idx = parseInt(val, 10);
+    if (!html5El?.textTracks) return;
+    for (let i = 0; i < html5El.textTracks.length; i++) html5El.textTracks[i].mode = (i === idx) ? 'showing' : 'hidden';
+    toast(idx === -1 ? 'Captions off' : 'Captions on', 'success');
+  }
 
   // ---------------------------------------------------------------------
   // Overlay show/hide + touch lock
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // Gesture engine: swipe right-half = volume, swipe left-half = brightness,
+  // horizontal drag = seek, double-tap = skip ±10s. All gestures are
+  // no-ops while the player is locked (see toggleLock/locked above).
+  // ---------------------------------------------------------------------
+  function initGestureEngine() {
+    const tapZone = document.getElementById('tapZone');
+    if (!tapZone || tapZone.dataset.gestureBound) return;
+    tapZone.dataset.gestureBound = '1';
+    tapZone.addEventListener('touchstart', onGestureStart, { passive: false });
+    tapZone.addEventListener('touchmove', onGestureMove, { passive: false });
+    tapZone.addEventListener('touchend', onGestureEnd, { passive: false });
+  }
+
+  function onGestureStart(e) {
+    if (locked || !hasContent) return;
+    const t = e.touches[0];
+    gTouch.active = true;
+    gTouch.startX = gTouch.tapX = t.clientX;
+    gTouch.startY = gTouch.tapY = t.clientY;
+    gTouch.type = null;
+    gTouch.startVal = getCurrentVolumeFrac();
+    gTouch.startPos = getCurrentPlaybackTime();
+    gTouch.startBright = gBrightness;
+    gTouch.tapCount++;
+    if (gTouch.tapCount === 1) {
+      gTouch.tapTimer = setTimeout(() => { gTouch.tapCount = 0; }, 260);
+    } else if (gTouch.tapCount >= 2) {
+      clearTimeout(gTouch.tapTimer);
+      gTouch.tapCount = 0;
+      e.preventDefault();
+      const vc = document.getElementById('videoContainer');
+      const mid = (vc?.getBoundingClientRect().left || 0) + (vc?.offsetWidth || 360) / 2;
+      const sec = gTouch.tapX < mid ? -10 : 10;
+      showSkipRipple(gTouch.tapX, gTouch.tapY, sec);
+      haptic('light');
+      skipBy(sec);
+    }
+  }
+
+  function onGestureMove(e) {
+    if (!gTouch.active || locked) return;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - gTouch.startX, dy = t.clientY - gTouch.startY;
+    if (!gTouch.type && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) {
+      clearTimeout(gTouch.tapTimer);
+      gTouch.tapCount = 0;
+      if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+        gTouch.type = 'seek';
+      } else {
+        const vc = document.getElementById('videoContainer');
+        const mid = (vc?.getBoundingClientRect().left || 0) + (vc?.offsetWidth || 360) / 2;
+        gTouch.type = t.clientX < mid ? 'brightness' : 'volume';
+      }
+    }
+    if (!gTouch.type) return;
+    e.preventDefault();
+    if (gTouch.type === 'volume') applyVolumeGesture(dy);
+    else if (gTouch.type === 'brightness') applyBrightnessGesture(dy);
+    else if (gTouch.type === 'seek') applySeekGesture(dx);
+  }
+
+  function onGestureEnd() { gTouch.active = false; gTouch.type = null; }
+
+  function getCurrentVolumeFrac() {
+    if (activeSourceType === 'youtube' && player && typeof player.getVolume === 'function') return player.getVolume() / 100;
+    if (html5El) return html5El.volume;
+    return 1;
+  }
+  function getCurrentPlaybackTime() {
+    if (activeSourceType === 'youtube' && player && typeof player.getCurrentTime === 'function') return player.getCurrentTime();
+    if (html5El) return html5El.currentTime;
+    return 0;
+  }
+
+  function applyVolumeGesture(dy) {
+    const h = document.getElementById('videoContainer')?.offsetHeight || 220;
+    const v = Math.max(0, Math.min(1, gTouch.startVal - dy / h));
+    onVolumeChange(Math.round(v * 100));
+    const volBar = document.getElementById('ovVolumeBar');
+    if (volBar) volBar.value = Math.round(v * 100);
+    showGestureOsd(v === 0 ? 'volume_off' : v < 0.4 ? 'volume_down' : 'volume_up', v);
+  }
+
+  function applyBrightnessGesture(dy) {
+    const h = document.getElementById('videoContainer')?.offsetHeight || 220;
+    gBrightness = Math.max(0.15, Math.min(1, gTouch.startBright - dy / h));
+    const filter = `brightness(${gBrightness})`;
+    if (html5El) html5El.style.filter = filter;
+    const ytEl = document.getElementById('player');
+    if (ytEl) ytEl.style.filter = filter;
+    showGestureOsd(gBrightness < 0.35 ? 'brightness_low' : gBrightness < 0.7 ? 'brightness_medium' : 'brightness_high', gBrightness);
+  }
+
+  function applySeekGesture(dx) {
+    const dur = activeSourceType === 'youtube' ? (player?.getDuration?.() || 0) : (html5El?.duration || 0);
+    if (!dur) return;
+    const w = document.getElementById('videoContainer')?.offsetWidth || 360;
+    const delta = (dx / w) * 120;
+    const newT = Math.max(0, Math.min(dur, gTouch.startPos + delta));
+    if (activeSourceType === 'youtube' && player) player.seekTo(newT, true);
+    else if (html5El) html5El.currentTime = newT;
+    const curEl = document.getElementById('ovTimeCurrent');
+    if (curEl) curEl.textContent = formatDuration(newT);
+    showGestureOsd(delta >= 0 ? 'fast_forward' : 'fast_rewind', null, `${delta >= 0 ? '+' : ''}${Math.round(delta)}s`);
+  }
+
+  function showGestureOsd(icon, frac, textOverride) {
+    const osd = document.getElementById('osdGesture');
+    if (!osd) return;
+    document.getElementById('osdIcon').textContent = icon;
+    const barTrack = osd.querySelector('.osd-bar-track');
+    if (frac === null || frac === undefined) {
+      if (barTrack) barTrack.style.display = 'none';
+      document.getElementById('osdVal').textContent = textOverride || '';
+    } else {
+      if (barTrack) barTrack.style.display = 'block';
+      document.getElementById('osdBarFill').style.width = Math.round(frac * 100) + '%';
+      document.getElementById('osdVal').textContent = Math.round(frac * 100) + '%';
+    }
+    osd.classList.add('show');
+    clearTimeout(osd._hideTimer);
+    osd._hideTimer = setTimeout(() => osd.classList.remove('show'), 700);
+  }
+
+  function showSkipRipple(x, y, sec) {
+    const vc = document.getElementById('videoContainer');
+    if (!vc) return;
+    const el = document.createElement('div');
+    el.className = 'skip-ripple';
+    const r = vc.getBoundingClientRect();
+    el.style.left = (x - r.left - 40) + 'px';
+    el.style.top = (y - r.top - 40) + 'px';
+    el.innerHTML = `<span>${sec > 0 ? '+10s' : '-10s'}</span>`;
+    vc.appendChild(el);
+    setTimeout(() => el.remove(), 700);
+  }
+
   function initPlayerOverlay() {
+    initGestureEngine();
     const vc = document.getElementById('videoContainer');
     const tapZone = document.getElementById('tapZone');
 
@@ -1312,8 +1627,8 @@
   function playItemNow(item) {
     if (!isHost) { toast('Only the Host can start playback.', 'warning'); return; }
     if (item.type === 'raw') {
-      loadRawSource(item.url, item.title, 0, true);
-      socket.emit('video-command', { roomId, type: 'change-raw', url: item.url, title: item.title });
+      loadRawSource(item.url, item.title, 0, true, item.subtitles);
+      socket.emit('video-command', { roomId, type: 'change-raw', url: item.url, title: item.title, subtitles: item.subtitles || [] });
     } else {
       switchToYoutubeView();
       document.getElementById('overlayTitle').textContent = item.title || 'YouTube';
@@ -1368,7 +1683,7 @@
           progressEl.className = 'convert-progress show success';
           progressEl.innerHTML = '<span>Ready — playing for the room.</span>';
           closeLinkChoiceModal();
-          playItemNow({ url: job.masterUrl, title, channel: 'Converted', type: 'raw', isHls: true });
+          playItemNow({ url: job.masterUrl, title, channel: 'Converted', type: 'raw', isHls: true, subtitles: job.subtitles || [] });
         } else if (job.status === 'error') {
           progressEl.className = 'convert-progress show error';
           progressEl.innerHTML = `<span>Conversion failed: ${escapeHtml(job.error || 'unknown error')}</span>`;
@@ -1393,12 +1708,16 @@
     const list = document.getElementById('queueList');
     if (!queue || queue.length === 0) { list.innerHTML = `<div class="empty-state">Queue is currently empty</div>`; return; }
     let html = '';
-    queue.forEach(item => {
+    queue.forEach((item, idx) => {
       const key = item.id || item.url;
       videoRegistry[key] = item;
       const thumb = item.thumb || '';
+      const dragHandle = isHost
+        ? `<div class="dh" title="Drag to reorder" onclick="event.stopPropagation()"><span class="material-icons">drag_indicator</span></div>`
+        : '';
       html += `
-      <div class="media-card" onclick="playQueueItem('${key}')">
+      <div class="media-card" data-index="${idx}" onclick="playQueueItem('${key}')">
+        ${dragHandle}
         ${thumb ? `<img class="media-thumb" src="${thumb}" loading="lazy">` : `<div class="media-thumb"><span class="material-icons">link</span></div>`}
         <div class="media-info">
           <div class="media-title">${escapeHtml(item.title)}</div>
@@ -1407,6 +1726,89 @@
       </div>`;
     });
     list.innerHTML = html;
+    if (isHost) enableQueueDragReorder();
+  }
+
+  // ---------------------------------------------------------------------
+  // Queue drag-and-drop reorder (host only). Supports both native HTML5
+  // drag events (desktop) and a touch-driven drag (mobile, via the handle).
+  // ---------------------------------------------------------------------
+  function enableQueueDragReorder() {
+    const cards = document.querySelectorAll('#queueList .media-card');
+    cards.forEach(card => {
+      const idx = parseInt(card.dataset.index, 10);
+      card.setAttribute('draggable', 'true');
+      card.addEventListener('dragstart', e => {
+        dragSrcIndex = idx;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        document.querySelectorAll('#queueList .media-card.drag-over').forEach(c => c.classList.remove('drag-over'));
+      });
+      card.addEventListener('dragover', e => { e.preventDefault(); card.classList.add('drag-over'); });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', e => {
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        if (dragSrcIndex !== null && dragSrcIndex !== idx) reorderQueue(dragSrcIndex, idx);
+        dragSrcIndex = null;
+      });
+      setupTouchDragForCard(card, idx);
+    });
+  }
+
+  function reorderQueue(from, to) {
+    if (!isHost) return;
+    haptic('medium');
+    socket.emit('reorder-queue', { roomId, from, to });
+    // Optimistic local reorder — the server's queue-update broadcast will confirm it shortly after
+    const item = cachedQueueData.splice(from, 1)[0];
+    cachedQueueData.splice(to, 0, item);
+    renderQueue(cachedQueueData);
+  }
+
+  function setupTouchDragForCard(card, idx) {
+    const handle = card.querySelector('.dh');
+    if (!handle) return;
+    handle.addEventListener('touchstart', e => {
+      if (touchDragEl) return;
+      touchDragIdx = idx;
+      touchDragEl = card;
+      touchDragY = e.touches[0].clientY;
+      touchDragClone = card.cloneNode(true);
+      const r = card.getBoundingClientRect();
+      touchDragClone.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${card.offsetWidth}px;opacity:.85;z-index:9500;pointer-events:none;box-shadow:0 8px 32px rgba(0,0,0,.6);`;
+      document.body.appendChild(touchDragClone);
+      card.style.opacity = '.3';
+      haptic('medium');
+    }, { passive: true });
+    handle.addEventListener('touchmove', e => {
+      if (!touchDragClone) return;
+      const dy = e.touches[0].clientY - touchDragY;
+      touchDragClone.style.top = (parseFloat(touchDragClone.style.top) + dy) + 'px';
+      touchDragY = e.touches[0].clientY;
+      const under = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+      document.querySelectorAll('#queueList .media-card.drag-over').forEach(c => c.classList.remove('drag-over'));
+      const overCard = under?.closest('.media-card');
+      if (overCard && overCard !== touchDragEl) overCard.classList.add('drag-over');
+    }, { passive: true });
+    handle.addEventListener('touchend', e => {
+      if (!touchDragClone) return;
+      touchDragClone.remove();
+      touchDragClone = null;
+      if (touchDragEl) touchDragEl.style.opacity = '';
+      touchDragEl = null;
+      const under = document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+      document.querySelectorAll('#queueList .media-card.drag-over').forEach(c => c.classList.remove('drag-over'));
+      const overCard = under?.closest('.media-card[data-index]');
+      if (overCard) {
+        const to = parseInt(overCard.dataset.index, 10);
+        if (!isNaN(to) && to !== touchDragIdx) reorderQueue(touchDragIdx, to);
+      }
+      touchDragIdx = null;
+    }, { passive: true });
   }
 
   function selectCategory(cat, el) {
@@ -1555,109 +1957,4 @@
       recorder.onstop = () => {
         if (!voiceMuted && chunks.length && socket) {
           const blob = new Blob(chunks, { type: mimeType });
-          const reader = new FileReader();
-          reader.onloadend = () => socket.emit('voice-chunk', { roomId, user: username, data: reader.result });
-          reader.readAsDataURL(blob);
-        }
-        if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 0);
-      };
-      recorder.onerror = () => { if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 200); };
-      recorder.start();
-      setTimeout(() => { if (recorder.state !== 'inactive') recorder.stop(); }, VOICE_CLIP_MS);
-    };
-    recordOneClip();
-  }
-
-  function toggleMute() {
-    voiceMuted = !voiceMuted;
-    const btn = document.getElementById('voiceMuteBtn');
-    const icon = btn.querySelector('.material-icons');
-    btn.classList.toggle('muted', voiceMuted);
-    if (icon) icon.textContent = voiceMuted ? 'mic_off' : 'volume_up';
-    if (mediaStream) mediaStream.getAudioTracks().forEach(t => t.enabled = !voiceMuted);
-  }
-
-  function stopVoice() {
-    if (!voiceActive) return;
-    voiceActive = false;
-    clearTimeout(voiceRecordTimer);
-    voiceRecordTimer = null;
-    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
-    mediaStream = null;
-
-    const joinBtn = document.getElementById('voiceJoinBtn');
-    joinBtn.classList.remove('on', 'connecting');
-    document.getElementById('voiceMuteBtn').style.display = 'none';
-    document.getElementById('voiceStatusText').textContent = '';
-
-    if (socket) socket.emit('voice-leave', { roomId, user: username });
-    cleanupVoiceUser(username);
-    delete voiceParticipantsMap[username];
-    renderVoiceParticipants();
-    toast('Left voice chat');
-  }
-
-  function updateAudioDucking() {
-    const anyoneTalking = Object.keys(voiceParticipantsMap).some(u => u !== username && voiceParticipantsMap[u]) ||
-                          Object.keys(voicePlayingNow).some(u => u !== username && voicePlayingNow[u]);
-    if (activeSourceType === 'youtube' && player && typeof player.setVolume === 'function') player.setVolume(anyoneTalking ? 15 : 100);
-    else if (activeSourceType === 'raw' && html5El) html5El.volume = anyoneTalking ? 0.15 : 1.0;
-  }
-
-  function markSpeaking(user) {
-    if (!(user in voiceParticipantsMap)) return;
-    voiceParticipantsMap[user] = true;
-    renderVoiceParticipants();
-    updateAudioDucking();
-    clearTimeout(speakingResetTimers[user]);
-    speakingResetTimers[user] = setTimeout(() => { voiceParticipantsMap[user] = false; renderVoiceParticipants(); updateAudioDucking(); }, 600);
-  }
-
-  function enqueueVoiceClip(user, dataUrl) {
-    if (!voicePlaybackQueues[user]) voicePlaybackQueues[user] = [];
-    const queue = voicePlaybackQueues[user];
-    queue.push(dataUrl);
-    while (queue.length > VOICE_MAX_QUEUED_CLIPS) queue.shift();
-    drainVoiceQueue(user);
-  }
-
-  function drainVoiceQueue(user) {
-    if (voicePlayingNow[user]) return;
-    const queue = voicePlaybackQueues[user];
-    if (!queue || queue.length === 0) return;
-    voicePlayingNow[user] = true;
-    updateAudioDucking();
-    const clipUrl = queue.shift();
-    const audio = new Audio(clipUrl);
-    const advance = () => { voicePlayingNow[user] = false; updateAudioDucking(); drainVoiceQueue(user); };
-    audio.onended = advance;
-    audio.onerror = advance;
-    audio.play().catch(advance);
-  }
-
-  function cleanupVoiceUser(user) {
-    delete voicePlaybackQueues[user];
-    delete voicePlayingNow[user];
-    clearTimeout(speakingResetTimers[user]);
-    delete speakingResetTimers[user];
-    updateAudioDucking();
-  }
-
-  function renderVoiceParticipants() {
-    const el = document.getElementById('voiceParticipants');
-    const names = Object.keys(voiceParticipantsMap);
-    if (names.length === 0) { el.innerHTML = `<span class="voice-empty">No one is in voice chat yet</span>`; return; }
-    el.innerHTML = names.map(name => {
-      const speaking = voiceParticipantsMap[name];
-      return `<div class="voice-chip ${speaking ? 'speaking' : ''}">
-        <div class="mini-avatar" style="background:${avatarColor(name)};">${initials(name)}</div>
-        ${escapeHtml(name)}
-        <div class="speak-dot"></div>
-      </div>`;
-    }).join('');
-  }
-
-  function copyRoomId() { navigator.clipboard.writeText(roomId).then(() => toast('Room code copied: ' + roomId, 'success')); }
-</script>
-</body>
-</html>
+          con
