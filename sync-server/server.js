@@ -297,6 +297,7 @@ io.on('connection', (socket) => {
       roomsData[roomId] = {
         count: 0, admin: socket.id, members: {}, queue: [], voiceUsers: new Set(),
         sourceType: 'none', currentVideoId: null, currentRawUrl: null, currentRawTitle: null,
+        currentRawSubtitles: null,
         currentVideoTime: 0, playbackState: 'paused', lastUpdatedAt: Date.now()
       };
     }
@@ -312,7 +313,8 @@ io.on('connection', (socket) => {
 
     socket.emit('initial-sync', {
       sourceType: room.sourceType, videoId: room.currentVideoId, rawUrl: room.currentRawUrl,
-      title: room.currentRawTitle, time: currentPlaybackTime(room), playbackState: room.playbackState
+      title: room.currentRawTitle, time: currentPlaybackTime(room), playbackState: room.playbackState,
+      subtitles: room.currentRawSubtitles
     });
 
     io.to(roomId).emit('chat-message', { type: 'system', text: `${username.toUpperCase()} JOINED THE ROOM`, timestamp: Date.now() });
@@ -331,6 +333,7 @@ io.on('connection', (socket) => {
     }
     if (data.type === 'change-raw') {
       room.sourceType = 'raw'; room.currentRawUrl = data.url; room.currentRawTitle = data.title || null; room.currentVideoId = null;
+      room.currentRawSubtitles = data.subtitles || null;
       room.currentVideoTime = 0; room.playbackState = 'playing'; room.lastUpdatedAt = Date.now();
     }
 
@@ -358,6 +361,17 @@ io.on('connection', (socket) => {
       room.queue = [];
       io.to(roomId).emit('queue-update', room.queue);
     }
+  });
+
+  socket.on('reorder-queue', (data) => {
+    const room = roomsData[data.roomId];
+    if (!room || room.admin !== socket.id) return;
+    const { from, to } = data;
+    if (typeof from !== 'number' || typeof to !== 'number') return;
+    if (from < 0 || from >= room.queue.length || to < 0 || to >= room.queue.length) return;
+    const item = room.queue.splice(from, 1)[0];
+    room.queue.splice(to, 0, item);
+    io.to(data.roomId).emit('queue-update', room.queue);
   });
 
   socket.on('chat-message', (data) => {
