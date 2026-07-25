@@ -63,7 +63,36 @@
   .video-container.has-content .player-placeholder { display: none; }
   .video-container:not(.has-content) .tap-zone,
   .video-container:not(.has-content) .player-overlay,
-  .video-container:not(.has-content) .lock-layer { display: none; }
+  .video-container:not(.has-content) .lock-layer,
+  .video-container:not(.has-content) .reaction-tray,
+  .video-container:not(.has-content) .buffer-badge { display: none; }
+
+  /* Custom overlay controls, gestures, and touch-lock are for direct/converted
+     links only — YouTube uses its own native player controls instead. */
+  .video-container.yt-mode .tap-zone,
+  .video-container.yt-mode .player-overlay,
+  .video-container.yt-mode .lock-layer,
+  .video-container.yt-mode .osd-gesture,
+  .video-container.yt-mode .reaction-tray { display: none !important; }
+
+  /* Video loading skeleton — shown from the moment a video is chosen until
+     the browser has enough data to paint the first frame. */
+  .video-skeleton { position: absolute; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center; background: linear-gradient(90deg, #10121a 25%, #1c1f2c 50%, #10121a 75%); background-size: 600px 100%; animation: shim 1.3s infinite linear; }
+  .video-container.loading-video .video-skeleton { display: flex; }
+  .video-skeleton .material-icons { font-size: 30px; color: rgba(255,255,255,0.22); }
+  @keyframes shim { 0% { background-position: -600px 0; } 100% { background-position: 600px 0; } }
+
+  /* Mid-playback buffering indicator (distinct from the initial-load skeleton above) */
+  .buffer-badge { position: absolute; bottom: 66px; left: 50%; transform: translateX(-50%); z-index: 14; background: rgba(10,12,17,0.82); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 6px 14px; display: none; align-items: center; gap: 8px; font-size: 11px; color: #fff; font-weight: 700; font-family: 'Montserrat', sans-serif; }
+  .buffer-badge.show { display: flex; }
+  .buffer-badge .spinner { width: 12px; height: 12px; }
+
+  /* Floating emoji reactions */
+  .reaction-tray { position: absolute; bottom: 12px; left: 12px; z-index: 15; display: flex; gap: 4px; background: rgba(10,12,17,0.6); border: 1px solid rgba(255,255,255,0.12); border-radius: 22px; padding: 5px; backdrop-filter: blur(6px); }
+  .reaction-tray button { background: transparent; border: none; font-size: 18px; padding: 5px 6px; border-radius: 50%; line-height: 1; cursor: pointer; }
+  .reaction-tray button:active { background: rgba(255,255,255,0.15); transform: scale(1.15); }
+  .floating-emoji { position: absolute; bottom: 60px; z-index: 17; font-size: 26px; pointer-events: none; animation: floatUpFade 2.2s ease-out forwards; }
+  @keyframes floatUpFade { 0% { opacity: 0; transform: translateY(0) scale(0.6); } 15% { opacity: 1; transform: translateY(-20px) scale(1); } 100% { opacity: 0; transform: translateY(-180px) scale(1.1); } }
 
   .tap-zone { position: absolute; inset: 0; z-index: 5; }
 
@@ -175,6 +204,7 @@
   .skeleton-lines { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 7px; }
   .skeleton-line { height: 8px; border-radius: 4px; background: var(--panel-border); width: 80%; animation: pulse 1.3s infinite ease-in-out; }
   .skeleton-line.short { width: 40%; }
+  .room-skel-row { height: 40px; border-radius: var(--radius-sm); background: var(--panel-border); margin-bottom: 7px; animation: pulse 1.3s infinite ease-in-out; }
   @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 
   .load-more-btn { width: 100%; padding: 11px; margin-top: 4px; background: var(--panel); border: 1px dashed var(--panel-border); color: var(--text-dim); border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; cursor: pointer; font-family: 'Montserrat', sans-serif; }
@@ -223,7 +253,7 @@
   .nav-item.active { color: var(--accent); }
   .nav-item.active::after { content: ''; width: 16px; height: 2px; background: var(--accent); border-radius: 2px; margin-top: 2px; box-shadow: 0 0 6px var(--accent); }
   .nav-item .material-icons { font-size: 19px; }
-  .unread-badge { position: absolute; top: 2px; right: 28%; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid var(--bg-elevated); display: none; }
+  .unread-badge { position: absolute; top: -2px; right: 22%; min-width: 15px; height: 15px; padding: 0 3px; background: var(--danger); border-radius: 8px; border: 2px solid var(--bg-elevated); display: none; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #fff; font-family: 'Montserrat', sans-serif; line-height: 1; }
 
   #loginModal { position: fixed; inset: 0; background: rgba(4, 5, 8, 0.97); backdrop-filter: blur(10px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 18px; }
   .modal-card { width: 100%; max-width: 340px; background: var(--panel); padding: 26px 22px; border-radius: 20px; border: 1px solid var(--panel-border); box-shadow: var(--shadow-lg); max-height: 90vh; overflow-y: auto; }
@@ -271,6 +301,14 @@
       <p style="color: var(--text-dim); font-size: 11px; margin-top: 5px;">Watch together, in perfect sync</p>
     </div>
 
+    <div id="rejoinBanner" style="display:none; align-items:center; justify-content:space-between; gap:10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 14px;">
+      <div>
+        <div style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;">Last Room</div>
+        <div style="font-size:13px; font-weight:700; color:var(--accent);" id="rejoinRoomCode">----</div>
+      </div>
+      <button class="btn btn-sm" onclick="rejoinLastRoom()">Rejoin</button>
+    </div>
+
     <div class="segmented">
       <button id="modeCreateBtn" class="active" onclick="setLoginMode('create')" type="button">Create Room</button>
       <button id="modeJoinBtn" onclick="setLoginMode('join')" type="button">Join Room</button>
@@ -289,7 +327,8 @@
     <div class="active-rooms-box">
       <h3>Active Public Rooms</h3>
       <div id="activeRoomsList">
-        <div style="font-size: 11px; color: var(--text-dim); text-align: center; padding: 10px;">Scanning for active rooms...</div>
+        <div class="room-skel-row"></div>
+        <div class="room-skel-row"></div>
       </div>
     </div>
   </div>
@@ -314,6 +353,17 @@
     <span class="material-icons">live_tv</span>
     <div class="ph-title">Nothing Playing</div>
     <div class="ph-sub">Search YouTube or paste a link to get started</div>
+  </div>
+
+  <div class="video-skeleton" id="videoSkeleton"><span class="material-icons">movie</span></div>
+  <div class="buffer-badge" id="bufferBadge"><div class="spinner"></div><span>Buffering…</span></div>
+  <div class="reaction-tray" id="reactionTray">
+    <button onclick="sendReaction('❤️')">❤️</button>
+    <button onclick="sendReaction('😂')">😂</button>
+    <button onclick="sendReaction('😮')">😮</button>
+    <button onclick="sendReaction('👏')">👏</button>
+    <button onclick="sendReaction('🔥')">🔥</button>
+    <button onclick="sendReaction('👍')">👍</button>
   </div>
 
   <div class="tap-zone" id="tapZone"></div>
@@ -355,9 +405,7 @@
   </div>
 
   <div class="audio-menu" id="audioMenu">
-    <div class="audio-menu-title">Quality</div>
-    <select id="qualitySelect" onchange="onQualityChange(this.value)"><option value="-1">Auto</option></select>
-    <div class="audio-menu-title" style="margin-top:10px;">Audio Track</div>
+    <div class="audio-menu-title">Audio Track</div>
     <select id="audioTrackSelect" onchange="onAudioTrackChangeUnified(this.value)"><option value="0">Default</option></select>
     <div class="audio-menu-title" style="margin-top:10px;">Captions</div>
     <select id="captionSelect" onchange="onCaptionChange(this.value)"><option value="-1">N/A</option></select>
@@ -433,6 +481,19 @@
       </div>
       <div class="mini-avatar" id="settingsAvatar">
         <div class="host-crown" id="hostCrownSettings"><span class="material-icons">workspace_premium</span></div>
+      </div>
+    </div>
+    <div class="setting-tile">
+      <div>
+        <div class="setting-label">Autoplay Next In Queue</div>
+        <div class="setting-val" id="autoplayNextStatus" style="color: var(--success);">ON</div>
+      </div>
+      <button class="copy-btn" id="autoplayToggleBtn" onclick="toggleAutoplayNext()" style="display:none;"><span class="material-icons">sync_alt</span> Toggle</button>
+    </div>
+    <div class="setting-tile">
+      <div>
+        <div class="setting-label">Keyboard Shortcuts</div>
+        <div class="setting-val" style="font-size: 11px; color: var(--text-dim); line-height: 1.6;">Space play/pause · ←/→ seek · ↑/↓ volume · F fullscreen · M mute · L lock</div>
       </div>
     </div>
     <h3 style="margin-top: 8px;">Session</h3>
@@ -573,6 +634,9 @@
     try { if (navigator.vibrate) navigator.vibrate(intensity === 'medium' ? 20 : intensity === 'strong' ? 40 : 8); } catch (e) {}
   }
 
+  let autoplayNextEnabled = true;
+  let unreadChatCount = 0;
+
 
   // FIX 1: UNIFIED SOCKET LIFECYCLE
   // The socket connects immediately on page load, eliminating the race condition.
@@ -598,8 +662,18 @@
     document.getElementById('hostCrownTop').style.display = display;
     document.getElementById('hostCrownSettings').style.display = display;
     document.getElementById('clearQueueBtn').style.display = display;
+    document.getElementById('autoplayToggleBtn').style.display = isHost ? 'flex' : 'none';
+    if (typeof data.autoplayNext === 'boolean') { autoplayNextEnabled = data.autoplayNext; updateAutoplayNextUI(); }
     if (data.queue) { cachedQueueData = data.queue; renderQueue(cachedQueueData); }
   });
+
+  socket.on('autoplay-next-changed', (enabled) => {
+    autoplayNextEnabled = enabled;
+    updateAutoplayNextUI();
+    toast(`Autoplay next ${enabled ? 'enabled' : 'disabled'}`, 'default');
+  });
+
+  socket.on('reaction', (data) => { spawnFloatingEmoji(data.emoji); });
 
   socket.on('members-update', (list) => renderMembers(list));
 
@@ -635,7 +709,12 @@
       </div>`);
     }
     const isChatActive = document.getElementById('tab-chat').classList.contains('active');
-    if (!isChatActive) document.getElementById('chatBadge').style.display = 'block';
+    if (!isChatActive && msg.type !== 'system') {
+      unreadChatCount++;
+      const badge = document.getElementById('chatBadge');
+      badge.textContent = unreadChatCount > 9 ? '9+' : String(unreadChatCount);
+      badge.style.display = 'flex';
+    }
     if (isAtBottom || !isChatActive) box.scrollTop = box.scrollHeight;
   });
 
@@ -753,6 +832,7 @@
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     el.classList.add('active');
     if (tabId === 'chat') {
+      unreadChatCount = 0;
       document.getElementById('chatBadge').style.display = 'none';
       const box = document.getElementById('chatBox');
       box.scrollTop = box.scrollHeight;
@@ -780,6 +860,20 @@
   }
 
   if (username) document.getElementById('nameInput').value = username;
+
+  if (username && roomId) {
+    const banner = document.getElementById('rejoinBanner');
+    document.getElementById('rejoinRoomCode').textContent = roomId;
+    banner.style.display = 'flex';
+  }
+
+  function rejoinLastRoom() {
+    if (!roomId || !username) return;
+    setLoginMode('join');
+    document.getElementById('nameInput').value = username;
+    document.getElementById('roomInput').value = roomId;
+    joinApp();
+  }
 
   function setLoginMode(mode) {
     loginMode = mode;
@@ -943,14 +1037,20 @@
     ytApiReady = true;
     clearTimeout(ytApiTimeoutHandle);
     player = new YT.Player('player', {
-      playerVars: { playsinline: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, iv_load_policy: 3 },
+      // Native controls are handed to the host only — our custom overlay
+      // doesn't cover YouTube anymore, but guests must stay non-interactive
+      // or their taps would change local playback without going through
+      // our host-gated sync logic at all.
+      playerVars: { playsinline: 1, controls: isHost ? 1 : 0, disablekb: isHost ? 0 : 1, modestbranding: 1, rel: 0, iv_load_policy: 3 },
       events: {
         onStateChange: onPlayerStateChange,
-        onError: onPlayerError
+        onError: onPlayerError,
+        onReady: () => restoreVolumePreference()
       }
     });
   }
   function onPlayerError(event) {
+    hideVideoSkeleton();
     const messages = {
       2: 'Invalid video link',
       5: 'This video cannot be played in this player',
@@ -981,6 +1081,7 @@
     const icon = document.querySelector('#overlayPlayPauseBtn .material-icons');
     if (event.data === YT.PlayerState.PLAYING && icon) icon.textContent = 'pause';
     if (event.data === YT.PlayerState.PAUSED && icon) icon.textContent = 'play_arrow';
+    if (event.data === YT.PlayerState.PLAYING || event.data === YT.PlayerState.BUFFERING) hideVideoSkeleton();
 
     if (isLocalEchoSuppressed()) return;
     if (!isHost) {
@@ -989,10 +1090,7 @@
     }
     if (event.data === YT.PlayerState.PLAYING) socket.emit('video-command', { roomId, type: 'seek', time: player.getCurrentTime() });
     else if (event.data === YT.PlayerState.PAUSED) socket.emit('video-command', { roomId, type: 'pause' });
-    else if (event.data === YT.PlayerState.ENDED) {
-      socket.emit('pop-queue', roomId);
-      setTimeout(() => { if (cachedQueueData.length > 0) playQueueItem(cachedQueueData[0].id || cachedQueueData[0].url); }, 500);
-    }
+    else if (event.data === YT.PlayerState.ENDED) advanceQueueOnEnd();
   }
 
   // Polls YouTube's current time/duration since the iframe has no timeupdate event.
@@ -1011,18 +1109,23 @@
   function hidePlaceholder() {
     hasContent = true;
     document.getElementById('videoContainer').classList.add('has-content');
+    showVideoSkeleton();
     showControlsNow();
   }
+
+  function showVideoSkeleton() { document.getElementById('videoContainer').classList.add('loading-video'); }
+  function hideVideoSkeleton() { document.getElementById('videoContainer').classList.remove('loading-video'); }
 
   function switchToYoutubeView() {
     activeSourceType = 'youtube';
     hidePlaceholder();
+    document.getElementById('videoContainer').classList.add('yt-mode');
+    if (locked) { locked = false; document.getElementById('videoContainer').classList.remove('locked', 'show-unlock'); }
     document.getElementById('player').style.display = 'block';
     document.getElementById('html5Player').style.display = 'none';
     document.getElementById('audioMenu').classList.remove('show');
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
     if (html5El) { html5El.pause(); html5El.removeAttribute('src'); }
-    document.getElementById('qualitySelect').innerHTML = '<option value="-1">N/A</option>';
     document.getElementById('audioTrackSelect').innerHTML = '<option value="0">N/A</option>';
     document.getElementById('captionSelect').innerHTML = '<option value="-1">N/A</option>';
   }
@@ -1032,6 +1135,7 @@
     currentRawUrlGlobal = url;
     document.getElementById('overlayTitle').textContent = title || 'Direct Link';
     hidePlaceholder();
+    document.getElementById('videoContainer').classList.remove('yt-mode');
     document.getElementById('player').style.display = 'none';
     document.getElementById('html5Player').style.display = 'block';
     if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
@@ -1072,7 +1176,6 @@
       hlsInstance.loadSource(url);
       hlsInstance.attachMedia(html5El);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-        populateQualitySelect(hlsInstance.levels);
         populateAudioTrackSelect(hlsInstance.audioTracks);
         html5El.currentTime = seekTime || 0;
         if (autoplay) attemptAutoplay();
@@ -1096,7 +1199,6 @@
       });
     } else if (isM3u8 && html5El.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari/iOS)
-      document.getElementById('qualitySelect').innerHTML = '<option value="-1">Source</option>';
       document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
       html5El.src = url;
       html5El.onerror = () => toast('Could not load that stream — check the link', 'error');
@@ -1105,7 +1207,6 @@
         if (autoplay) attemptAutoplay();
       }, { once: true });
     } else {
-      document.getElementById('qualitySelect').innerHTML = '<option value="-1">Source</option>';
       document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
       html5El.src = url;
       html5El.onerror = () => toast('Could not load that link — check it points directly to a video file', 'error');
@@ -1116,11 +1217,6 @@
     }
   }
 
-  function populateQualitySelect(levels) {
-    const sel = document.getElementById('qualitySelect');
-    sel.innerHTML = '<option value="-1">Auto</option>' + levels.map((lvl, i) => `<option value="${i}">${lvl.height}p</option>`).join('');
-  }
-  function onQualityChange(val) { if (hlsInstance) hlsInstance.currentLevel = parseInt(val, 10); }
   function populateAudioTrackSelect(tracks) {
     const sel = document.getElementById('audioTrackSelect');
     sel.dataset.native = '0'; // these are hls.js variant-stream audio tracks, not embedded file tracks
@@ -1391,6 +1487,27 @@
     setTimeout(() => el.remove(), 700);
   }
 
+  // ---------------------------------------------------------------------
+  // Floating emoji reactions — tap an emoji, everyone in the room (including
+  // the sender) sees it rise and fade over the video.
+  // ---------------------------------------------------------------------
+  function sendReaction(emoji) {
+    if (!roomId || !socket || !socket.connected) return;
+    haptic('light');
+    socket.emit('send-reaction', { roomId, emoji });
+  }
+
+  function spawnFloatingEmoji(emoji) {
+    const vc = document.getElementById('videoContainer');
+    if (!vc) return;
+    const el = document.createElement('div');
+    el.className = 'floating-emoji';
+    el.textContent = emoji;
+    el.style.left = (20 + Math.random() * 60) + '%';
+    vc.appendChild(el);
+    setTimeout(() => el.remove(), 2300);
+  }
+
   function initPlayerOverlay() {
     initGestureEngine();
     const vc = document.getElementById('videoContainer');
@@ -1454,6 +1571,22 @@
       if (isLocalEchoSuppressed() || activeSourceType !== 'raw' || !isHost) return;
       socket.emit('video-command', { roomId, type: 'seek', time: html5El.currentTime });
     };
+
+    html5El.addEventListener('waiting', () => {
+      if (activeSourceType === 'raw') document.getElementById('bufferBadge').classList.add('show');
+    });
+    html5El.addEventListener('playing', () => {
+      document.getElementById('bufferBadge').classList.remove('show');
+      hideVideoSkeleton();
+    });
+    html5El.addEventListener('canplay', () => { hideVideoSkeleton(); });
+    html5El.addEventListener('loadeddata', () => { hideVideoSkeleton(); });
+    html5El.addEventListener('pause', () => { document.getElementById('bufferBadge').classList.remove('show'); });
+    html5El.addEventListener('ended', () => {
+      if (isHost && activeSourceType === 'raw') advanceQueueOnEnd();
+    });
+
+    restoreVolumePreference();
   }
 
   function showControlsNow() {
@@ -1517,6 +1650,19 @@
   function onVolumeChange(val) {
     if (activeSourceType === 'youtube' && player && player.setVolume) player.setVolume(val);
     else if (html5El) { html5El.volume = val / 100; if (val > 0) html5El.muted = false; }
+    try { localStorage.setItem('st_volume', String(val)); } catch (e) {}
+  }
+
+  // Restores the last volume the user set, across sessions and reloads.
+  function restoreVolumePreference() {
+    let saved;
+    try { saved = localStorage.getItem('st_volume'); } catch (e) { saved = null; }
+    if (saved === null) return;
+    const val = Math.max(0, Math.min(100, parseInt(saved, 10) || 100));
+    const volBar = document.getElementById('ovVolumeBar');
+    if (volBar) volBar.value = val;
+    if (html5El) html5El.volume = val / 100;
+    if (activeSourceType === 'youtube' && player && player.setVolume) player.setVolume(val);
   }
 
   function cycleSpeed() {
@@ -1538,6 +1684,63 @@
     if (document.fullscreenElement) document.exitFullscreen();
     else if (container.requestFullscreen) container.requestFullscreen().catch(() => {});
   }
+
+  function toggleVideoMute() {
+    if (activeSourceType === 'youtube' && player) {
+      if (typeof player.isMuted === 'function' && player.isMuted()) { player.unMute(); toast('Unmuted'); }
+      else if (player.mute) { player.mute(); toast('Muted'); }
+    } else if (html5El) {
+      html5El.muted = !html5El.muted;
+      toast(html5El.muted ? 'Muted' : 'Unmuted');
+    }
+  }
+
+  // Desktop keyboard shortcuts — ignored while typing in any text field, and
+  // only active once a video is loaded. Playback actions still respect the
+  // existing host-only gating inside togglePlayPause/skipBy.
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+    if (!hasContent) return;
+    const volBar = document.getElementById('ovVolumeBar');
+    switch (e.key) {
+      case ' ':
+        e.preventDefault();
+        togglePlayPause();
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        skipBy(-10);
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        skipBy(10);
+        break;
+      case 'ArrowUp': {
+        e.preventDefault();
+        const v = Math.min(100, parseInt(volBar.value, 10) + 5);
+        volBar.value = v;
+        onVolumeChange(v);
+        break;
+      }
+      case 'ArrowDown': {
+        e.preventDefault();
+        const v = Math.max(0, parseInt(volBar.value, 10) - 5);
+        volBar.value = v;
+        onVolumeChange(v);
+        break;
+      }
+      case 'f': case 'F':
+        toggleFullscreen();
+        break;
+      case 'm': case 'M':
+        toggleVideoMute();
+        break;
+      case 'l': case 'L':
+        if (activeSourceType === 'raw') toggleLock();
+        break;
+    }
+  });
 
   function downloadCurrentVideo() {
     if (activeSourceType !== 'raw' || !currentRawUrlGlobal) { toast('Download is only available for direct video links', 'warning'); return; }
@@ -1617,6 +1820,33 @@
     if (!item) { toast('That item is no longer available', 'error'); return; }
     if (!isHost) { toast('Only the Host can start playback.', 'warning'); return; }
     routeItemForPlayback(item);
+  }
+
+  // Called when the current video finishes — advances to the next queued item,
+  // unless the host has turned autoplay off (see Settings > Autoplay Next).
+  function advanceQueueOnEnd() {
+    if (!isHost) return;
+    if (!autoplayNextEnabled) { toast('Video ended — autoplay is off', 'default'); return; }
+    socket.emit('pop-queue', roomId);
+    setTimeout(() => {
+      if (cachedQueueData.length > 0) {
+        const next = cachedQueueData[0];
+        toast('Up next: ' + (next.title || 'Untitled').slice(0, 40), 'default');
+        playQueueItem(next.id || next.url);
+      }
+    }, 500);
+  }
+
+  function updateAutoplayNextUI() {
+    const statusEl = document.getElementById('autoplayNextStatus');
+    if (!statusEl) return;
+    statusEl.textContent = autoplayNextEnabled ? 'ON' : 'OFF';
+    statusEl.style.color = autoplayNextEnabled ? 'var(--success)' : 'var(--text-dim)';
+  }
+
+  function toggleAutoplayNext() {
+    if (!isHost) return;
+    socket.emit('set-autoplay-next', { roomId, enabled: !autoplayNextEnabled });
   }
 
   function routeItemForPlayback(item) {
