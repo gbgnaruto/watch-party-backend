@@ -117,12 +117,7 @@ function buildFfmpegArgs(inputPath, outDir, audioStreams) {
   args.push('-map', '0:v:0');
   audioStreams.forEach(a => args.push('-map', `0:${a.index}`));
 
-  // Single rendition at source resolution — no downscale ladder. CRF encoding
-  // targets a fixed visual quality rather than a fixed bitrate ceiling, so
-  // output stays close to the original instead of being capped/downscaled.
-  // Thread count is capped (default 2, override with FFMPEG_THREADS) because
-  // uncapped encoding is a common cause of OOM kills on small hosting tiers —
-  // each extra x264 thread adds its own frame buffers.
+  // CPU Optimization: Single rendition at source resolution
   const threads = process.env.FFMPEG_THREADS || '2';
   args.push(
     '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-threads', threads,
@@ -130,18 +125,26 @@ function buildFfmpegArgs(inputPath, outDir, audioStreams) {
   );
   audioStreams.forEach((a, i) => args.push(`-c:a:${i}`, 'aac', `-b:a:${i}`, '192k', `-ac:${i}`, '2'));
 
-  const streamMapParts = ['v:0,a:0,name:source,agroup:aud'];
+  const streamMapParts = [];
+  
+  // FIX: HLS strict compliance - Video is separated from audio track 0
+  streamMapParts.push('v:0,name:source,agroup:aud');
+
   audioStreams.forEach((a, ai) => {
-    const lang = a.language || 'und';
-    const label = a.title || `Track ${ai + 1} (${lang})`;
-    streamMapParts.push(`a:${ai},agroup:aud,name:${label},language:${lang}${ai === 0 ? ',default:yes' : ''}`);
+    const safeLang = (a.language || 'und').replace(/[^a-zA-Z0-9]/g, '');
+    
+    // FIX: Removed the 'name:' property which causes Exit 234 on Render's FFmpeg
+    streamMapParts.push(`a:${ai},agroup:aud,language:${safeLang}${ai === 0 ? ',default:YES' : ''}`);
   });
 
   args.push(
     '-var_stream_map', streamMapParts.join(' '),
     '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0', '-hls_flags', 'independent_segments',
     '-master_pl_name', 'master.m3u8',
-    '-hls_segment_filename', path.join(outDir, 'stream_%v/data%03d.ts'),
+    
+    // FIX: Replaced slash with underscore to prevent the ENOENT folder creation crash
+    '-hls_segment_filename', path.join(outDir, 'stream_%v_data%03d.ts'),
+    
     path.join(outDir, 'stream_%v.m3u8')
   );
   return args;
@@ -175,7 +178,7 @@ async function runConversionJob(jobId, inputPath) {
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, buildFfmpegArgs(inputPath, outDir, audioStreams));
       let stderrBuf = '';
-      const MAX_BUF = 20000; // keep enough tail to find the real error, not just ffmpeg's startup banner
+      const MAX_BUF = 20000;
 
       proc.stderr.on('data', d => {
         stderrBuf = (stderrBuf + d.toString()).slice(-MAX_BUF);
@@ -183,8 +186,6 @@ async function runConversionJob(jobId, inputPath) {
         if (m) jobs[jobId].lastTimeMark = `${m[1]}:${m[2]}:${m[3]}`;
       });
 
-      // Guards against a stuck/runaway encode consuming resources indefinitely
-      // on a memory-constrained host — kill it and fail cleanly instead.
       const maxMs = parseInt(process.env.FFMPEG_TIMEOUT_MS, 10) || 25 * 60 * 1000;
       const timeoutHandle = setTimeout(() => {
         proc.kill('SIGKILL');
@@ -198,10 +199,6 @@ async function runConversionJob(jobId, inputPath) {
         const errorLines = lines.filter(l => /error|invalid|failed|no such|could not|unsupported|unable to/i.test(l));
         const relevant = (errorLines.length ? errorLines : lines.slice(-8)).slice(-8).join('\n');
 
-        // A signal, or an unusually high/nonstandard exit code (ffmpeg's own
-        // failures almost always exit with 1), points to the OS or hosting
-        // platform terminating the process — most commonly an out-of-memory
-        // kill — rather than ffmpeg reporting a real internal error.
         const looksLikeSystemKill = !!signal || code > 128;
         if (looksLikeSystemKill) {
           return reject(new Error(
@@ -235,14 +232,6 @@ async function runConversionJob(jobId, inputPath) {
   }
 }
 
-// Extracts a safe file extension from a URL's pathname only (never the query
-// string or the full URL), and only accepts alphanumeric extensions of
-// reasonable length. This prevents a URL like "https://x.com/A" (no real
-// extension) from producing a garbage value such as "com/A" via naive
-// string splitting — a slash in the "extension" turns `${jobId}.${ext}`
-// into a nested path that path.join() silently accepts, causing a
-// confusing ENOENT when the download stream tries to write to a
-// non-existent subdirectory.
 function safeExtensionFromUrl(url) {
   const FALLBACK = 'mp4';
   try {
@@ -335,7 +324,6 @@ io.on('connection', (socket) => {
     room.count++;
     room.members[socket.id] = username;
     
-    // IMMEDATE HOST CONFIRMATION FIX: Bypasses network lag to grant the creator instant control
     socket.emit('room-info', { count: room.count, queue: room.queue, isAdmin: room.admin === socket.id, autoplayNext: room.autoplayNext });
 
     broadcastActiveRooms();
@@ -370,7 +358,6 @@ io.on('connection', (socket) => {
     socket.to(data.roomId).emit('sync-video', data);
   });
 
-  // Feature: host-controlled "autoplay next" toggle for the queue
   socket.on('set-autoplay-next', (data) => {
     const room = roomsData[data.roomId];
     if (!room || room.admin !== socket.id) return;
@@ -378,7 +365,6 @@ io.on('connection', (socket) => {
     io.to(data.roomId).emit('autoplay-next-changed', room.autoplayNext);
   });
 
-  // Feature: floating emoji reactions, broadcast to everyone in the room
   socket.on('send-reaction', (data) => {
     const room = roomsData[data.roomId];
     if (!room) return;
@@ -483,6 +469,11 @@ io.on('connection', (socket) => {
     else broadcastRoomState(currentRoom);
     broadcastActiveRooms();
   });
+});
+
+// FIX: Catch-all route restored so refreshing the page doesn't throw "Cannot GET /"
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
