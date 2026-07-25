@@ -120,8 +120,12 @@ function buildFfmpegArgs(inputPath, outDir, audioStreams) {
   // Single rendition at source resolution — no downscale ladder. CRF encoding
   // targets a fixed visual quality rather than a fixed bitrate ceiling, so
   // output stays close to the original instead of being capped/downscaled.
+  // Thread count is capped (default 2, override with FFMPEG_THREADS) because
+  // uncapped encoding is a common cause of OOM kills on small hosting tiers —
+  // each extra x264 thread adds its own frame buffers.
+  const threads = process.env.FFMPEG_THREADS || '2';
   args.push(
-    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast',
+    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-threads', threads,
     '-g', '48', '-keyint_min', '48', '-sc_threshold', '0'
   );
   audioStreams.forEach((a, i) => args.push(`-c:a:${i}`, 'aac', `-b:a:${i}`, '192k', `-ac:${i}`, '2'));
@@ -170,13 +174,45 @@ async function runConversionJob(jobId, inputPath) {
     jobs[jobId].status = 'encoding';
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, buildFfmpegArgs(inputPath, outDir, audioStreams));
-      let stderrTail = '';
+      let stderrBuf = '';
+      const MAX_BUF = 20000; // keep enough tail to find the real error, not just ffmpeg's startup banner
+
       proc.stderr.on('data', d => {
-        stderrTail = (stderrTail + d.toString()).slice(-4000);
+        stderrBuf = (stderrBuf + d.toString()).slice(-MAX_BUF);
         const m = d.toString().match(/time=(\d+):(\d+):(\d+\.\d+)/);
         if (m) jobs[jobId].lastTimeMark = `${m[1]}:${m[2]}:${m[3]}`;
       });
-      proc.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg exited ' + code + '\n' + stderrTail)));
+
+      // Guards against a stuck/runaway encode consuming resources indefinitely
+      // on a memory-constrained host — kill it and fail cleanly instead.
+      const maxMs = parseInt(process.env.FFMPEG_TIMEOUT_MS, 10) || 25 * 60 * 1000;
+      const timeoutHandle = setTimeout(() => {
+        proc.kill('SIGKILL');
+      }, maxMs);
+
+      proc.on('close', (code, signal) => {
+        clearTimeout(timeoutHandle);
+        if (code === 0) return resolve();
+
+        const lines = stderrBuf.split('\n').map(l => l.trim()).filter(Boolean);
+        const errorLines = lines.filter(l => /error|invalid|failed|no such|could not|unsupported|unable to/i.test(l));
+        const relevant = (errorLines.length ? errorLines : lines.slice(-8)).slice(-8).join('\n');
+
+        // A signal, or an unusually high/nonstandard exit code (ffmpeg's own
+        // failures almost always exit with 1), points to the OS or hosting
+        // platform terminating the process — most commonly an out-of-memory
+        // kill — rather than ffmpeg reporting a real internal error.
+        const looksLikeSystemKill = !!signal || code > 128;
+        if (looksLikeSystemKill) {
+          return reject(new Error(
+            `Conversion was terminated unexpectedly (${signal ? 'signal ' + signal : 'exit code ' + code}), most likely from running out of memory or CPU on this server. ` +
+            `This tends to happen with long or high-resolution source files.` +
+            (errorLines.length ? `\n\nLast ffmpeg output before termination:\n${relevant}` : '')
+          ));
+        }
+
+        reject(new Error(`ffmpeg exited with code ${code}\n${relevant}`));
+      });
       proc.on('error', reject);
     });
 
