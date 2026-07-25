@@ -113,26 +113,20 @@ function ffprobeStreams(filePath) {
 }
 
 function buildFfmpegArgs(inputPath, outDir, audioStreams) {
-  const LADDER = [
-    { name: '1080p', height: 1080, vbitrate: '5000k', maxrate: '5350k', bufsize: '7500k' },
-    { name: '720p', height: 720, vbitrate: '2800k', maxrate: '2996k', bufsize: '4200k' },
-    { name: '480p', height: 480, vbitrate: '1400k', maxrate: '1498k', bufsize: '2100k' }
-  ];
   const args = ['-y', '-i', inputPath];
-  LADDER.forEach(() => args.push('-map', '0:v:0'));
+  args.push('-map', '0:v:0');
   audioStreams.forEach(a => args.push('-map', `0:${a.index}`));
 
-  LADDER.forEach((rung, i) => {
-    args.push(
-      `-c:v:${i}`, 'libx264', `-filter:v:${i}`, `scale=-2:${rung.height}`,
-      `-b:v:${i}`, rung.vbitrate, `-maxrate:v:${i}`, rung.maxrate, `-bufsize:v:${i}`, rung.bufsize,
-      '-preset', 'veryfast', '-g', '48', '-keyint_min', '48', '-sc_threshold', '0'
-    );
-  });
-  audioStreams.forEach((a, i) => args.push(`-c:a:${i}`, 'aac', `-b:a:${i}`, '128k', `-ac:${i}`, '2'));
+  // Single rendition at source resolution — no downscale ladder. CRF encoding
+  // targets a fixed visual quality rather than a fixed bitrate ceiling, so
+  // output stays close to the original instead of being capped/downscaled.
+  args.push(
+    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast',
+    '-g', '48', '-keyint_min', '48', '-sc_threshold', '0'
+  );
+  audioStreams.forEach((a, i) => args.push(`-c:a:${i}`, 'aac', `-b:a:${i}`, '192k', `-ac:${i}`, '2'));
 
-  const streamMapParts = [];
-  LADDER.forEach((rung, vi) => streamMapParts.push(`v:${vi},a:0,name:${rung.name},agroup:aud`));
+  const streamMapParts = ['v:0,a:0,name:source,agroup:aud'];
   audioStreams.forEach((a, ai) => {
     const lang = a.language || 'und';
     const label = a.title || `Track ${ai + 1} (${lang})`;
@@ -297,7 +291,7 @@ io.on('connection', (socket) => {
       roomsData[roomId] = {
         count: 0, admin: socket.id, members: {}, queue: [], voiceUsers: new Set(),
         sourceType: 'none', currentVideoId: null, currentRawUrl: null, currentRawTitle: null,
-        currentRawSubtitles: null,
+        currentRawSubtitles: null, autoplayNext: true,
         currentVideoTime: 0, playbackState: 'paused', lastUpdatedAt: Date.now()
       };
     }
@@ -306,7 +300,7 @@ io.on('connection', (socket) => {
     room.members[socket.id] = username;
     
     // IMMEDATE HOST CONFIRMATION FIX: Bypasses network lag to grant the creator instant control
-    socket.emit('room-info', { count: room.count, queue: room.queue, isAdmin: room.admin === socket.id });
+    socket.emit('room-info', { count: room.count, queue: room.queue, isAdmin: room.admin === socket.id, autoplayNext: room.autoplayNext });
 
     broadcastActiveRooms();
     broadcastRoomState(roomId);
@@ -338,6 +332,24 @@ io.on('connection', (socket) => {
     }
 
     socket.to(data.roomId).emit('sync-video', data);
+  });
+
+  // Feature: host-controlled "autoplay next" toggle for the queue
+  socket.on('set-autoplay-next', (data) => {
+    const room = roomsData[data.roomId];
+    if (!room || room.admin !== socket.id) return;
+    room.autoplayNext = !!data.enabled;
+    io.to(data.roomId).emit('autoplay-next-changed', room.autoplayNext);
+  });
+
+  // Feature: floating emoji reactions, broadcast to everyone in the room
+  socket.on('send-reaction', (data) => {
+    const room = roomsData[data.roomId];
+    if (!room) return;
+    const ALLOWED = ['❤️', '😂', '😮', '👏', '🔥', '👍'];
+    if (!ALLOWED.includes(data.emoji)) return;
+    const username = room.members[socket.id] || 'Guest';
+    io.to(data.roomId).emit('reaction', { emoji: data.emoji, user: username });
   });
 
   socket.on('add-to-queue', (data) => {
