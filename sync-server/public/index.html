@@ -1957,4 +1957,109 @@
       recorder.onstop = () => {
         if (!voiceMuted && chunks.length && socket) {
           const blob = new Blob(chunks, { type: mimeType });
-          con
+          const reader = new FileReader();
+          reader.onloadend = () => socket.emit('voice-chunk', { roomId, user: username, data: reader.result });
+          reader.readAsDataURL(blob);
+        }
+        if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 0);
+      };
+      recorder.onerror = () => { if (voiceActive) voiceRecordTimer = setTimeout(recordOneClip, 200); };
+      recorder.start();
+      setTimeout(() => { if (recorder.state !== 'inactive') recorder.stop(); }, VOICE_CLIP_MS);
+    };
+    recordOneClip();
+  }
+
+  function toggleMute() {
+    voiceMuted = !voiceMuted;
+    const btn = document.getElementById('voiceMuteBtn');
+    const icon = btn.querySelector('.material-icons');
+    btn.classList.toggle('muted', voiceMuted);
+    if (icon) icon.textContent = voiceMuted ? 'mic_off' : 'volume_up';
+    if (mediaStream) mediaStream.getAudioTracks().forEach(t => t.enabled = !voiceMuted);
+  }
+
+  function stopVoice() {
+    if (!voiceActive) return;
+    voiceActive = false;
+    clearTimeout(voiceRecordTimer);
+    voiceRecordTimer = null;
+    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+
+    const joinBtn = document.getElementById('voiceJoinBtn');
+    joinBtn.classList.remove('on', 'connecting');
+    document.getElementById('voiceMuteBtn').style.display = 'none';
+    document.getElementById('voiceStatusText').textContent = '';
+
+    if (socket) socket.emit('voice-leave', { roomId, user: username });
+    cleanupVoiceUser(username);
+    delete voiceParticipantsMap[username];
+    renderVoiceParticipants();
+    toast('Left voice chat');
+  }
+
+  function updateAudioDucking() {
+    const anyoneTalking = Object.keys(voiceParticipantsMap).some(u => u !== username && voiceParticipantsMap[u]) ||
+                          Object.keys(voicePlayingNow).some(u => u !== username && voicePlayingNow[u]);
+    if (activeSourceType === 'youtube' && player && typeof player.setVolume === 'function') player.setVolume(anyoneTalking ? 15 : 100);
+    else if (activeSourceType === 'raw' && html5El) html5El.volume = anyoneTalking ? 0.15 : 1.0;
+  }
+
+  function markSpeaking(user) {
+    if (!(user in voiceParticipantsMap)) return;
+    voiceParticipantsMap[user] = true;
+    renderVoiceParticipants();
+    updateAudioDucking();
+    clearTimeout(speakingResetTimers[user]);
+    speakingResetTimers[user] = setTimeout(() => { voiceParticipantsMap[user] = false; renderVoiceParticipants(); updateAudioDucking(); }, 600);
+  }
+
+  function enqueueVoiceClip(user, dataUrl) {
+    if (!voicePlaybackQueues[user]) voicePlaybackQueues[user] = [];
+    const queue = voicePlaybackQueues[user];
+    queue.push(dataUrl);
+    while (queue.length > VOICE_MAX_QUEUED_CLIPS) queue.shift();
+    drainVoiceQueue(user);
+  }
+
+  function drainVoiceQueue(user) {
+    if (voicePlayingNow[user]) return;
+    const queue = voicePlaybackQueues[user];
+    if (!queue || queue.length === 0) return;
+    voicePlayingNow[user] = true;
+    updateAudioDucking();
+    const clipUrl = queue.shift();
+    const audio = new Audio(clipUrl);
+    const advance = () => { voicePlayingNow[user] = false; updateAudioDucking(); drainVoiceQueue(user); };
+    audio.onended = advance;
+    audio.onerror = advance;
+    audio.play().catch(advance);
+  }
+
+  function cleanupVoiceUser(user) {
+    delete voicePlaybackQueues[user];
+    delete voicePlayingNow[user];
+    clearTimeout(speakingResetTimers[user]);
+    delete speakingResetTimers[user];
+    updateAudioDucking();
+  }
+
+  function renderVoiceParticipants() {
+    const el = document.getElementById('voiceParticipants');
+    const names = Object.keys(voiceParticipantsMap);
+    if (names.length === 0) { el.innerHTML = `<span class="voice-empty">No one is in voice chat yet</span>`; return; }
+    el.innerHTML = names.map(name => {
+      const speaking = voiceParticipantsMap[name];
+      return `<div class="voice-chip ${speaking ? 'speaking' : ''}">
+        <div class="mini-avatar" style="background:${avatarColor(name)};">${initials(name)}</div>
+        ${escapeHtml(name)}
+        <div class="speak-dot"></div>
+      </div>`;
+    }).join('');
+  }
+
+  function copyRoomId() { navigator.clipboard.writeText(roomId).then(() => toast('Room code copied: ' + roomId, 'success')); }
+</script>
+</body>
+</html>
