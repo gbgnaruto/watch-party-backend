@@ -55,7 +55,7 @@ setInterval(cleanOldStreams, CLEANUP_INTERVAL_MS);
 // File Downloader
 // ---------------------------------------------------------------------------
 const BLOCKED_HOSTS = ['youtube.com', 'youtu.be', 'vimeo.com', 'netflix.com', 'twitch.tv', 'dailymotion.com'];
-function downloadToFile(url, destPath, redirects = 0) {
+function downloadToFile(url, destPath, redirects = 0, jobRef = null) {
   return new Promise((resolve, reject) => {
     let host;
     try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return reject(new Error('Invalid URL')); }
@@ -68,10 +68,11 @@ function downloadToFile(url, destPath, redirects = 0) {
     const req = lib.get(url, { headers: { 'User-Agent': 'SyncTube/1.0' } }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
-        return resolve(downloadToFile(res.headers.location, destPath, redirects + 1));
+        return resolve(downloadToFile(res.headers.location, destPath, redirects + 1, jobRef));
       }
       if (res.statusCode !== 200) { res.resume(); return reject(new Error('Failed to fetch URL: HTTP ' + res.statusCode)); }
       const fileStream = fs.createWriteStream(destPath);
+      if (jobRef) jobRef.fileStream = fileStream;
       res.pipe(fileStream);
       fileStream.on('finish', () => fileStream.close(resolve));
       fileStream.on('error', reject);
@@ -82,7 +83,7 @@ function downloadToFile(url, destPath, redirects = 0) {
 }
 
 // ---------------------------------------------------------------------------
-// Conversion Pipeline (Multi-Audio & Codec Safe)
+// Conversion Pipeline (Multi-Audio, Codec Safe & Instant Playback)
 // ---------------------------------------------------------------------------
 const jobs = {};
 
@@ -100,10 +101,11 @@ function ffprobeStreams(filePath) {
   });
 }
 
-function extractSubtitles(inputPath, outDir, subtitleStreams) {
+function extractSubtitles(inputPath, outDir, subtitleStreams, jobRef) {
   return Promise.all(subtitleStreams.map((s, i) => new Promise((resolve) => {
     const outFile = path.join(outDir, `sub_${i}.vtt`);
     const proc = spawn(ffmpegPath, ['-y', '-i', inputPath, '-map', `0:${s.index}`, outFile]);
+    if (jobRef) jobRef.processes.push(proc);
     proc.on('close', () => resolve({ file: `sub_${i}.vtt`, language: s.tags?.language || 'und', title: s.tags?.title || `Subtitle ${i + 1}` }));
     proc.on('error', () => resolve(null));
   }))).then(list => list.filter(Boolean));
@@ -130,11 +132,17 @@ function buildMasterPlaylist(outDir, audioLangs) {
 async function runConversionJob(jobId, inputPath) {
   const outDir = path.join(HLS_DIR, jobId);
   fs.mkdirSync(outDir, { recursive: true });
+  const job = jobs[jobId];
+  if (!job) return;
 
   try {
-    jobs[jobId].status = 'probing';
+    job.status = 'probing';
     const probe = await ffprobeStreams(inputPath);
     
+    // Extract real video title from metadata or fallback to filename
+    const detectedTitle = probe.format?.tags?.title || probe.format?.tags?.TITLE || path.basename(inputPath, path.extname(inputPath));
+    job.title = detectedTitle;
+
     const videoStream = (probe.streams || []).find(s => s.codec_type === 'video');
     const videoCodec = videoStream?.codec_name || 'h264';
 
@@ -144,44 +152,42 @@ async function runConversionJob(jobId, inputPath) {
     
     if (audioStreams.length === 0) throw new Error('No audio streams found in source file');
 
-    jobs[jobId].status = 'extracting_subtitles';
-    jobs[jobId].subtitles = await extractSubtitles(inputPath, outDir, subtitleStreams);
+    job.status = 'extracting_subtitles';
+    job.subtitles = await extractSubtitles(inputPath, outDir, subtitleStreams, job);
 
-    jobs[jobId].status = 'encoding';
-    jobs[jobId].masterUrl = `/hls/${jobId}/master.m3u8`;
+    job.status = 'encoding';
+    job.masterUrl = `/hls/${jobId}/master.m3u8`;
 
-    // 1. Write the master playlist right away so hls.js can parse all audio tracks
     buildMasterPlaylist(outDir, audioStreams);
 
-    // 2. Spawn extra audio-only streams in parallel for tracks 1..N
+    // Spawn extra audio-only streams in parallel for tracks 1..N
     for (let i = 1; i < audioStreams.length; i++) {
       const aArgs = [
         '-y', '-i', inputPath,
         '-map', `0:${audioStreams[i].index}`, '-vn',
         '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
-        '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+        '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0',
         '-hls_flags', 'append_list',
         '-hls_segment_filename', path.join(outDir, `seg_${i}_%03d.ts`),
         path.join(outDir, `stream_${i}.m3u8`)
       ];
       const aProc = spawn(ffmpegPath, aArgs);
+      job.processes.push(aProc);
       aProc.stderr.on('data', () => {}); 
     }
 
-    // 3. Determine encoding strategy: Copy if H.264, otherwise ultrafast transcode to prevent browser mediaError
     const isCodecSupported = ['h264', 'avc1'].includes(videoCodec.toLowerCase());
     const videoArgs = isCodecSupported 
       ? ['-c:v', 'copy'] 
       : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p'];
 
-    // 4. Main Pass: Video + Track 0 audio muxed together into stream_0.m3u8
     const mainArgs = [
       '-y', '-i', inputPath,
       '-map', '0:v:0', '-map', `0:${audioStreams[0].index}`,
       ...videoArgs,
       '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
       '-max_muxing_queue_size', '9999',
-      '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+      '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0',
       '-hls_flags', 'append_list',
       '-hls_segment_filename', path.join(outDir, 'seg_0_%03d.ts'),
       path.join(outDir, 'stream_0.m3u8')
@@ -189,25 +195,29 @@ async function runConversionJob(jobId, inputPath) {
 
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, mainArgs);
+      job.processes.push(proc);
       let stderrBuf = '';
       let isLiveSignaled = false;
 
-      // Watch output folder: trigger playback at 5 segments (30 sec buffer)
+      // TRIGGER PLAYBACK AT 2 SEGMENTS (~12 seconds) FOR INSTANT START!
       const segWatcher = fs.watch(outDir, (event, filename) => {
         if (!isLiveSignaled && filename && filename.endsWith('.ts')) {
-          const segs = fs.readdirSync(outDir).filter(f => f.endsWith('.ts')).length;
-          if (segs >= 5) {
-            isLiveSignaled = true;
-            jobs[jobId].status = 'done'; // Signal frontend to play immediately
-            console.log(`[Live Stream] Job ${jobId} buffered 30s. Starting playback!`);
-          }
+          try {
+            const segs = fs.readdirSync(outDir).filter(f => f.endsWith('.ts')).length;
+            job.segments = segs;
+            if (segs >= 2) {
+              isLiveSignaled = true;
+              job.status = 'done'; 
+              console.log(`[Instant Stream] Job ${jobId} buffered 2 segments. Starting playback instantly!`);
+            }
+          } catch(e) {}
         }
       });
 
       proc.stderr.on('data', d => {
         stderrBuf = (stderrBuf + d.toString()).slice(-20000);
         const m = d.toString().match(/time=(\d+):(\d+):(\d+\.\d+)/);
-        if (m) jobs[jobId].lastTimeMark = `${m[1]}:${m[2]}:${m[3]}`;
+        if (m) job.lastTimeMark = `${m[1]}:${m[2]}:${m[3]}`;
       });
 
       const maxMs = parseInt(process.env.FFMPEG_TIMEOUT_MS, 10) || 25 * 60 * 1000;
@@ -215,9 +225,9 @@ async function runConversionJob(jobId, inputPath) {
 
       proc.on('close', (code, signal) => {
         clearTimeout(timeoutHandle);
-        segWatcher.close();
+        try { segWatcher.close(); } catch(e) {}
         if (code === 0) {
-          if (!isLiveSignaled) jobs[jobId].status = 'done';
+          if (!isLiveSignaled) job.status = 'done';
           return resolve();
         }
         if (!!signal || code > 128) return reject(new Error('Conversion terminated (OOM Kill)'));
@@ -227,8 +237,10 @@ async function runConversionJob(jobId, inputPath) {
     });
 
   } catch (err) {
-    jobs[jobId].status = 'error';
-    jobs[jobId].error = err.message;
+    if (jobs[jobId]) {
+      jobs[jobId].status = 'error';
+      jobs[jobId].error = err.message;
+    }
     fs.rm(outDir, { recursive: true, force: true }, () => {});
   } finally {
     fs.rm(inputPath, { force: true }, () => {});
@@ -251,25 +263,71 @@ app.post('/api/convert-from-url', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'Missing url' });
 
   const jobId = crypto.randomBytes(6).toString('hex');
-  jobs[jobId] = { status: 'queued' };
+  jobs[jobId] = { status: 'queued', processes: [], fileStream: null, title: 'Converted Video' };
   res.json({ jobId });
 
   const ext = safeExtensionFromUrl(url);
   const destPath = path.join(UPLOAD_DIR, `${jobId}.${ext}`);
   try {
     jobs[jobId].status = 'downloading';
-    await downloadToFile(url, destPath);
+    await downloadToFile(url, destPath, 0, jobs[jobId]);
     runConversionJob(jobId, destPath);
   } catch (err) {
-    jobs[jobId].status = 'error';
-    jobs[jobId].error = err.message;
+    if (jobs[jobId]) {
+      jobs[jobId].status = 'error';
+      jobs[jobId].error = err.message;
+    }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Cancel Conversion Endpoint
+// ---------------------------------------------------------------------------
+app.post('/api/convert/cancel', (req, res) => {
+  const { jobId } = req.body;
+  if (!jobId || !jobs[jobId]) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  const job = jobs[jobId];
+  try {
+    if (job.fileStream && typeof job.fileStream.destroy === 'function') {
+      job.fileStream.destroy();
+    }
+    if (job.processes && Array.isArray(job.processes)) {
+      job.processes.forEach(p => {
+        try { p.kill('SIGKILL'); } catch(e) {}
+      });
+    }
+    const outDir = path.join(HLS_DIR, jobId);
+    if (fs.existsSync(outDir)) {
+      fs.rmSync(outDir, { recursive: true, force: true });
+    }
+    const files = fs.readdirSync(UPLOAD_DIR);
+    files.forEach(f => {
+      if (f.startsWith(jobId)) {
+        try { fs.unlinkSync(path.join(UPLOAD_DIR, f)); } catch(e) {}
+      }
+    });
+  } catch(e) {
+    console.error('[Cancel] Error cleaning up job:', e.message);
+  }
+
+  delete jobs[jobId];
+  res.json({ status: 'ok', message: 'Conversion cancelled successfully' });
 });
 
 app.get('/api/convert/status/:jobId', (req, res) => {
   const job = jobs[req.params.jobId];
   if (!job) return res.status(404).json({ error: 'Unknown job' });
-  res.json(job);
+  res.json({
+    status: job.status,
+    masterUrl: job.masterUrl || '',
+    title: job.title || 'Converted Video',
+    subtitles: job.subtitles || [],
+    error: job.error || null,
+    lastTimeMark: job.lastTimeMark || null
+  });
 });
 
 // ---------------------------------------------------------------------------
