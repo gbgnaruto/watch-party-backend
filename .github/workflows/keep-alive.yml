@@ -1,0 +1,13 @@
+name: Keep Render Awake
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping SyncTube Server
+        run: curl -s https://watch-party-backend-wzj6.onrender.com/api/diagnostic > /dev/null
