@@ -873,6 +873,7 @@ function joinApp() {
     if (!nameVal) {
         document.getElementById('nameInput').classList.add('input-error');
         document.getElementById('nameError').classList.add('show');
+        toast('Please enter a display name to continue', 'error');
         hasError = true;
     }
     if (loginMode === 'join') {
@@ -880,6 +881,7 @@ function joinApp() {
         if (!roomVal) {
             document.getElementById('roomInput').classList.add('input-error');
             document.getElementById('roomError').classList.add('show');
+            toast('Please enter the room code', 'error');
             hasError = true;
         }
         if (hasError) return;
@@ -1516,7 +1518,7 @@ function initPlayerOverlay() {
     html5El.onplay = () => {
         if (isLocalEchoSuppressed() || activeSourceType !== 'raw') return;
         if (!isHost) { toast('Only the Host can pause or seek the video.', 'warning'); return; }
-        socket.emit('video-command', { roomId, type: 'seek', time: html5El.currentTime };
+        socket.emit('video-command', { roomId, type: 'seek', time: html5El.currentTime });
     };
     html5El.onpause = () => {
         if (isLocalEchoSuppressed() || activeSourceType !== 'raw') return;
