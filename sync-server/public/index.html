@@ -59,9 +59,9 @@ body.theater-mode .video-container { max-height: 50vh; flex: 0 0 50vh; aspect-ra
 .player-placeholder .ph-title { font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 13px; color: var(--text-dim); letter-spacing: 0.5px; }
 .player-placeholder .ph-sub { font-size: 11px; color: var(--text-faint); }
 .video-container.has-content .player-placeholder { display: none; }
-.video-container:not(.has-content) .tap-zone, .video-container:not(.has-content) .player-overlay, .video-container:not(.has-content) .lock-layer, .video-container:not(.has-content) .reaction-tray, .video-container:not(.has-content) .buffer-badge { display: none; }
+.video-container:not(.has-content) .tap-zone, .video-container:not(.has-content) .player-overlay, .video-container:not(.has-content) .lock-layer, .video-container:not(.has-content) .buffer-badge { display: none; }
 
-.video-container.yt-mode .tap-zone, .video-container.yt-mode .player-overlay, .video-container.yt-mode .lock-layer, .video-container.yt-mode .osd-gesture, .video-container.yt-mode .reaction-tray { display: none !important; }
+.video-container.yt-mode .tap-zone, .video-container.yt-mode .player-overlay, .video-container.yt-mode .lock-layer, .video-container.yt-mode .osd-gesture { display: none !important; }
 
 .video-skeleton { position: absolute; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center; background: linear-gradient(90deg, #10121a 25%, #1c1f2c 50%, #10121a 75%); background-size: 600px 100%; animation: shim 1.3s infinite linear; }
 .video-container.loading-video .video-skeleton { display: flex; }
@@ -71,13 +71,6 @@ body.theater-mode .video-container { max-height: 50vh; flex: 0 0 50vh; aspect-ra
 .buffer-badge { position: absolute; bottom: 66px; left: 50%; transform: translateX(-50%); z-index: 14; background: rgba(10,12,17,0.82); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 6px 14px; display: none; align-items: center; gap: 8px; font-size: 11px; color: #fff; font-weight: 700; font-family: 'Montserrat', sans-serif; }
 .buffer-badge.show { display: flex; }
 .buffer-badge .spinner { width: 12px; height: 12px; }
-
-/* Floating emoji reactions */
-.reaction-tray { position: absolute; bottom: 12px; left: 12px; z-index: 15; display: flex; gap: 4px; background: rgba(10,12,17,0.6); border: 1px solid rgba(255,255,255,0.12); border-radius: 22px; padding: 5px; backdrop-filter: blur(6px); }
-.reaction-tray button { background: transparent; border: none; font-size: 18px; padding: 5px 6px; border-radius: 50%; line-height: 1; cursor: pointer; }
-.reaction-tray button:active { background: rgba(255,255,255,0.15); transform: scale(1.15); }
-.floating-emoji { position: absolute; bottom: 60px; z-index: 17; font-size: 26px; pointer-events: none; animation: floatUpFade 2.2s ease-out forwards; }
-@keyframes floatUpFade { 0% { opacity: 0; transform: translateY(0) scale(0.6); } 15% { opacity: 1; transform: translateY(-20px) scale(1); } 100% { opacity: 0; transform: translateY(-180px) scale(1.1); } }
 
 .tap-zone { position: absolute; inset: 0; z-index: 5; }
 .player-overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 20%, rgba(0,0,0,0) 68%, rgba(0,0,0,0.7) 100%); }
@@ -107,10 +100,16 @@ body.theater-mode .video-container { max-height: 50vh; flex: 0 0 50vh; aspect-ra
 .ov-spacer { flex: 1; }
 .ov-text-btn { background: rgba(10,12,17,0.5); border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 5px 10px; border-radius: 8px; font-size: 11px; font-weight: 700; font-family: 'Montserrat', sans-serif; }
 
-.audio-menu { position: absolute; top: 48px; right: 10px; z-index: 14; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; display: none; min-width: 160px; box-shadow: var(--shadow-lg); }
+/* Foldable Mini Options Menu */
+.audio-menu { position: absolute; top: 46px; right: 10px; z-index: 14; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px; display: none; min-width: 170px; max-height: 220px; overflow-y: auto; box-shadow: var(--shadow-lg); }
 .audio-menu.show { display: block; }
-.audio-menu-title { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 6px; }
-.audio-menu select { width: 100%; background: var(--bg-elevated); color: var(--text); border: 1px solid var(--panel-border); border-radius: 7px; padding: 7px 8px; font-size: 11px; outline: none; }
+.audio-menu-section { margin-bottom: 6px; }
+.audio-menu-section:last-child { margin-bottom: 0; }
+.audio-menu-header { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 2px 4px; }
+.audio-menu-header .material-icons { font-size: 16px; color: var(--text-dim); }
+.audio-options-list { display: flex; flex-direction: column; gap: 3px; }
+.audio-option-item { background: var(--bg-elevated); border: 1px solid var(--panel-border); color: var(--text-dim); padding: 6px 9px; border-radius: 7px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audio-option-item:active, .audio-option-item.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
 
 .lock-layer { position: absolute; inset: 0; z-index: 12; display: none; align-items: center; justify-content: center; }
 .video-container.locked.show-unlock .lock-layer { display: flex; }
@@ -328,14 +327,6 @@ input[type="text"].input-error { border-color: var(--danger); }
     </div>
     <div class="video-skeleton" id="videoSkeleton"><span class="material-icons">movie</span></div>
     <div class="buffer-badge" id="bufferBadge"><div class="spinner"></div><span>Buffering…</span></div>
-    <div class="reaction-tray" id="reactionTray">
-        <button onclick="sendReaction('❤️')">❤️</button>
-        <button onclick="sendReaction('😂')">😂</button>
-        <button onclick="sendReaction('😮')">😮</button>
-        <button onclick="sendReaction('👏')">👏</button>
-        <button onclick="sendReaction('🔥')">🔥</button>
-        <button onclick="sendReaction('👍')">👍</button>
-    </div>
     <div class="tap-zone" id="tapZone"></div>
     <div class="osd-gesture" id="osdGesture"><span class="material-icons" id="osdIcon">volume_up</span><div class="osd-bar-track"><div class="osd-bar-fill" id="osdBarFill" style="width:100%"></div></div><span class="osd-val" id="osdVal">100%</span></div>
     <div class="player-overlay" id="playerOverlay">
@@ -371,11 +362,26 @@ input[type="text"].input-error { border-color: var(--danger); }
         </div>
     </div>
     
+    <!-- Foldable Mini Options Menu -->
     <div class="audio-menu" id="audioMenu">
-        <div class="audio-menu-title">Audio Track</div>
-        <select id="audioTrackSelect" onchange="onAudioTrackChangeUnified(this.value)"><option value="0">Default</option></select>
-        <div class="audio-menu-title" style="margin-top:10px;">Captions</div>
-        <select id="captionSelect" onchange="onCaptionChange(this.value)"><option value="-1">N/A</option></select>
+        <div class="audio-menu-section">
+            <div class="audio-menu-header" onclick="toggleAudioSection()">
+                <span>Audio Track</span>
+                <span class="material-icons" id="audioChevron">expand_less</span>
+            </div>
+            <div class="audio-options-list" id="audioOptionsList">
+                <div class="audio-option-item active" onclick="onAudioTrackChangeUnified(0)">Default Audio</div>
+            </div>
+        </div>
+        <div class="audio-menu-section" style="margin-top: 8px;">
+            <div class="audio-menu-header" onclick="toggleCaptionSection()">
+                <span>Captions</span>
+                <span class="material-icons" id="captionChevron">expand_more</span>
+            </div>
+            <div class="audio-options-list" id="captionOptionsList" style="display: none;">
+                <div class="audio-option-item active" onclick="onCaptionChange(-1)">Off</div>
+            </div>
+        </div>
     </div>
 
     <div class="lock-layer" id="lockLayer">
@@ -455,7 +461,7 @@ input[type="text"].input-error { border-color: var(--danger); }
             <button class="copy-btn" id="autoplayToggleBtn" onclick="toggleAutoplayNext()" style="display:none;"><span class="material-icons">sync_alt</span> Toggle</button>
         </div>
         
-        <!-- NEW DIAGNOSTICS UI -->
+        <!-- DIAGNOSTICS UI -->
         <h3 style="margin-top: 16px;">Server Health Diagnostics</h3>
         <div class="setting-tile">
             <div>
@@ -476,7 +482,7 @@ input[type="text"].input-error { border-color: var(--danger); }
                 <div class="setting-val" id="diagUsers" style="font-size: 12px; color: var(--text-dim);">Loading...</div>
             </div>
         </div>
-        <!-- END NEW DIAGNOSTICS UI -->
+        <!-- END DIAGNOSTICS UI -->
 
         <div class="setting-tile" style="margin-top: 16px;">
             <div>
@@ -644,7 +650,6 @@ socket.on('autoplay-next-changed', (enabled) => {
     updateAutoplayNextUI();
     toast(`Autoplay next ${enabled ? 'enabled' : 'disabled'}`, 'default');
 });
-socket.on('reaction', (data) => { spawnFloatingEmoji(data.emoji); });
 socket.on('members-update', (list) => renderMembers(list));
 socket.on('initial-sync', (data) => {
     if (data.sourceType === 'youtube' && data.videoId) {
@@ -1067,8 +1072,8 @@ function switchToYoutubeView() {
     document.getElementById('audioMenu').classList.remove('show');
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
     if (html5El) { html5El.pause(); html5El.removeAttribute('src'); }
-    document.getElementById('audioTrackSelect').innerHTML = '<option value="0">N/A</option>';
-    document.getElementById('captionSelect').innerHTML = '<option value="-1">N/A</option>';
+    document.getElementById('audioOptionsList').innerHTML = '<div class="audio-option-item active">N/A</div>';
+    document.getElementById('captionOptionsList').innerHTML = '<div class="audio-option-item active">N/A</div>';
 }
 
 function loadRawSource(url, title, seekTime, autoplay, subtitles) {
@@ -1082,7 +1087,6 @@ function loadRawSource(url, title, seekTime, autoplay, subtitles) {
     if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
     
-    document.getElementById('audioTrackSelect').dataset.native = '0';
     attachSubtitleTracks(url, subtitles);
 
     html5El.addEventListener('loadeddata', () => {
@@ -1123,7 +1127,7 @@ function loadRawSource(url, title, seekTime, autoplay, subtitles) {
             }
         });
     } else if (isM3u8 && html5El.canPlayType('application/vnd.apple.mpegurl')) {
-        document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
+        document.getElementById('audioOptionsList').innerHTML = '<div class="audio-option-item active">Default Audio</div>';
         html5El.src = url;
         html5El.onerror = () => toast('Could not load that stream — check the link', 'error');
         html5El.addEventListener('loadedmetadata', () => {
@@ -1131,7 +1135,7 @@ function loadRawSource(url, title, seekTime, autoplay, subtitles) {
             if (autoplay) attemptAutoplay();
         }, { once: true });
     } else {
-        document.getElementById('audioTrackSelect').innerHTML = '<option value="0">Default</option>';
+        document.getElementById('audioOptionsList').innerHTML = '<div class="audio-option-item active">Default Audio</div>';
         html5El.src = url;
         html5El.onerror = () => toast('Could not load that link — check it points directly to a video file', 'error');
         html5El.addEventListener('loadedmetadata', () => {
@@ -1141,27 +1145,49 @@ function loadRawSource(url, title, seekTime, autoplay, subtitles) {
     }
 }
 
+function toggleAudioSection() {
+    const list = document.getElementById('audioOptionsList');
+    const chev = document.getElementById('audioChevron');
+    const isHidden = list.style.display === 'none';
+    list.style.display = isHidden ? 'flex' : 'none';
+    chev.textContent = isHidden ? 'expand_less' : 'expand_more';
+}
+
+function toggleCaptionSection() {
+    const list = document.getElementById('captionOptionsList');
+    const chev = document.getElementById('captionChevron');
+    const isHidden = list.style.display === 'none';
+    list.style.display = isHidden ? 'flex' : 'none';
+    chev.textContent = isHidden ? 'expand_less' : 'expand_more';
+}
+
 function populateAudioTrackSelect(tracks) {
-    const sel = document.getElementById('audioTrackSelect');
-    sel.dataset.native = '0';
+    const listEl = document.getElementById('audioOptionsList');
     if (!tracks || tracks.length <= 1) {
-        sel.innerHTML = '<option value="0">Default Audio</option>';
+        listEl.innerHTML = '<div class="audio-option-item active">Default Audio</div>';
         return;
     }
-    sel.innerHTML = tracks.map((t, i) => `<option value="${i}">${escapeHtml(t.name || t.lang || ('Track ' + (i + 1)))}</option>`).join('');
+    let html = '';
+    tracks.forEach((t, i) => {
+        const active = (hlsInstance?.audioTrack === i) ? ' active' : '';
+        html += `<div class="audio-option-item${active}" onclick="onAudioTrackChange(${i})">${escapeHtml(t.name || t.lang || ('Track ' + (i + 1)))}</div>`;
+    });
+    listEl.innerHTML = html;
 }
 
 function onAudioTrackChange(val) {
     if (hlsInstance) hlsInstance.audioTrack = parseInt(val, 10);
+    const items = document.querySelectorAll('#audioOptionsList .audio-option-item');
+    items.forEach((el, idx) => el.classList.toggle('active', idx === parseInt(val, 10)));
+    toast('Audio track switched', 'success');
 }
 
 function onAudioTrackChangeUnified(val) {
-    const sel = document.getElementById('audioTrackSelect');
-    if (sel.dataset.native === '1') {
-        const idx = parseInt(val, 10);
-        if (html5El?.audioTracks) {
-            for (let i = 0; i < html5El.audioTracks.length; i++) html5El.audioTracks[i].enabled = (i === idx);
-        }
+    const idx = parseInt(val, 10);
+    if (html5El?.audioTracks && html5El.audioTracks.length > 1) {
+        for (let i = 0; i < html5El.audioTracks.length; i++) html5El.audioTracks[i].enabled = (i === idx);
+        const items = document.querySelectorAll('#audioOptionsList .audio-option-item');
+        items.forEach((el, i) => el.classList.toggle('active', i === idx));
         toast('Audio track switched', 'success');
     } else {
         onAudioTrackChange(val);
@@ -1202,14 +1228,14 @@ function pollNativeAudioTracks() {
 
 function populateNativeAudioTrackSelect(tracks) {
     if (!tracks || tracks.length <= 1) return;
-    const sel = document.getElementById('audioTrackSelect');
+    const listEl = document.getElementById('audioOptionsList');
     let html = '';
     for (let i = 0; i < tracks.length; i++) {
         const label = tracks[i].label || tracks[i].language || `Track ${i + 1}`;
-        html += `<option value="${i}"${tracks[i].enabled ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        const active = tracks[i].enabled ? ' active' : '';
+        html += `<div class="audio-option-item${active}" onclick="onAudioTrackChangeUnified(${i})">${escapeHtml(label)}</div>`;
     }
-    sel.innerHTML = html;
-    sel.dataset.native = '1';
+    listEl.innerHTML = html;
 }
 
 function attachSubtitleTracks(masterUrl, subtitles) {
@@ -1243,27 +1269,34 @@ function pollCaptions() {
     }
     if (ccPollCount < 10) ccPollHandle = setTimeout(pollCaptions, ccPollCount < 3 ? 400 : 900);
     else {
-        const sel = document.getElementById('captionSelect');
-        if (sel) sel.innerHTML = '<option value="-1">N/A</option>';
+        const listEl = document.getElementById('captionOptionsList');
+        if (listEl) listEl.innerHTML = '<div class="audio-option-item active">N/A</div>';
     }
 }
 
 function populateCaptionSelect(tracks) {
-    const sel = document.getElementById('captionSelect');
-    if (!sel) return;
-    let html = '<option value="-1">Off</option>';
+    const listEl = document.getElementById('captionOptionsList');
+    if (!listEl) return;
+    let html = '<div class="audio-option-item active" onclick="onCaptionChange(-1)">Off</div>';
     for (let i = 0; i < tracks.length; i++) {
         if (tracks[i].kind === 'metadata' || tracks[i].kind === 'chapters') continue;
         const label = tracks[i].label || tracks[i].language || `Track ${i + 1}`;
-        html += `<option value="${i}"${tracks[i].mode === 'showing' ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        const active = (tracks[i].mode === 'showing') ? ' active' : '';
+        html += `<div class="audio-option-item${active}" onclick="onCaptionChange(${i})">${escapeHtml(label)}</div>`;
     }
-    sel.innerHTML = html;
+    listEl.innerHTML = html;
 }
 
 function onCaptionChange(val) {
     const idx = parseInt(val, 10);
     if (!html5El?.textTracks) return;
     for (let i = 0; i < html5El.textTracks.length; i++) html5El.textTracks[i].mode = (i === idx) ? 'showing' : 'hidden';
+    const items = document.querySelectorAll('#captionOptionsList .audio-option-item');
+    items.forEach((el, i) => {
+        // Offset by 1 because index 0 is 'Off' (-1)
+        const itemVal = i === 0 ? -1 : i - 1;
+        el.classList.toggle('active', itemVal === idx);
+    });
     toast(idx === -1 ? 'Captions off' : 'Captions on', 'success');
 }
 
@@ -1403,23 +1436,6 @@ function showSkipRipple(x, y, sec) {
     el.innerHTML = `<span>${sec > 0 ? '+10s' : '-10s'}</span>`;
     vc.appendChild(el);
     setTimeout(() => el.remove(), 700);
-}
-
-function sendReaction(emoji) {
-    if (!roomId || !socket || !socket.connected) return;
-    haptic('light');
-    socket.emit('send-reaction', { roomId, emoji });
-}
-
-function spawnFloatingEmoji(emoji) {
-    const vc = document.getElementById('videoContainer');
-    if (!vc) return;
-    const el = document.createElement('div');
-    el.className = 'floating-emoji';
-    el.textContent = emoji;
-    el.style.left = (20 + Math.random() * 60) + '%';
-    vc.appendChild(el);
-    setTimeout(() => el.remove(), 2300);
 }
 
 function initPlayerOverlay() {
@@ -2165,27 +2181,21 @@ function copyRoomId() {
     navigator.clipboard.writeText(roomId).then(() => toast('Room code copied: ' + roomId, 'success'));
 }
 
-// ---------------------------------------------------------------------------
-// Diagnostic Dashboard Integration
-// ---------------------------------------------------------------------------
 async function fetchDiagnostics() {
     try {
         const res = await fetch('/api/diagnostic');
         if (!res.ok) throw new Error('Network response was not ok');
         const data = await res.json();
         
-        // Update Memory
         const memEl = document.getElementById('diagMemory');
         memEl.textContent = `${data.server.memory.rss} Used`;
         memEl.style.color = 'var(--text)';
         
-        // Update Jobs
         const jobsEl = document.getElementById('diagJobs');
         const activeJobs = (data.conversion_jobs.downloading || 0) + (data.conversion_jobs.encoding || 0);
         jobsEl.textContent = `${activeJobs} Active | ${data.conversion_jobs.queued || 0} Queued`;
         jobsEl.style.color = activeJobs > 0 ? 'var(--accent)' : 'var(--text)';
         
-        // Update Global Users
         const usersEl = document.getElementById('diagUsers');
         usersEl.textContent = `${data.websockets.totalUsers} users across ${data.websockets.totalRooms} rooms`;
         usersEl.style.color = 'var(--text)';
@@ -2197,7 +2207,6 @@ async function fetchDiagnostics() {
     }
 }
 
-// Intercept the switchTab function so diagnostics auto-refresh when opening Settings
 const originalSwitchTab = switchTab;
 switchTab = function(tabId, el) {
     originalSwitchTab(tabId, el);
