@@ -116,14 +116,30 @@ const ABR_FALLBACK_MIN_SOURCE_HEIGHT = 540; // skip the fallback rendition entir
 
 function ffprobeStreams(filePath) {
   return new Promise((resolve, reject) => {
+    if (!fs.existsSync(filePath)) {
+      return reject(new Error(`File not found: ${filePath}`));
+    }
+    
     const args = ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', filePath];
     const proc = spawn(ffprobePath, args);
     let out = '', err = '';
+    
     proc.stdout.on('data', d => out += d);
     proc.stderr.on('data', d => err += d);
+    
     proc.on('close', code => {
-      if (code !== 0) return reject(new Error(err || 'ffprobe failed'));
-      try { resolve(JSON.parse(out)); } catch (e) { reject(e); }
+      if (code !== 0) {
+        return reject(new Error(`ffprobe failed (exit ${code}): ${err.trim() || 'no error details'}`));
+      }
+      try { 
+        resolve(JSON.parse(out)); 
+      } catch (e) { 
+        reject(new Error(`Failed to parse ffprobe JSON: ${e.message}`));
+      }
+    });
+    
+    proc.on('error', (e) => {
+      reject(new Error(`Failed to spawn ffprobe: ${e.message}`));
     });
   });
 }
