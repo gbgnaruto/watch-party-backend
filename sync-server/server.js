@@ -1,636 +1,668 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const cors = require('cors');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
-const https = require('https');
-const httpLib = require('http');
-const { spawn } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
-const ffprobePath = require('ffprobe-static').path;
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
-const HLS_DIR = path.join(__dirname, 'hls_output');
-[UPLOAD_DIR, HLS_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
-
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(cors());
 app.use(express.json());
-app.use('/hls', express.static(HLS_DIR));
 
-// ---------------------------------------------------------------------------
-// Disk Cleanup: Purge streams and old jobs older than 4 hours every 30 minutes
-// ---------------------------------------------------------------------------
-const STREAM_MAX_AGE_MS = 4 * 60 * 60 * 1000; 
-const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;    
+// Ensure the root public directory exists
+const publicDir = path.join(__dirname, 'public');
+if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+}
+app.use('/public', express.static(publicDir));
+
+// ── Disk Cleanup — auto-delete stream folders older than 4 hours ──
+const STREAM_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;    // run every 30 minutes
 
 function cleanOldStreams() {
     try {
-        const protectedJobIds = new Set();
-        Object.values(roomsData).forEach(room => {
-            const m = room.currentRawUrl && room.currentRawUrl.match(/\/hls\/([a-f0-9]+)\//);
-            if (m) protectedJobIds.add(m[1]);
-        });
+        const entries = fs.readdirSync(publicDir);
+        let deleted = 0, freed = 0;
 
-        const entries = fs.readdirSync(HLS_DIR);
-        let deleted = 0;
         for (const name of entries) {
-            if (protectedJobIds.has(name)) continue;
-            const dir = path.join(HLS_DIR, name);
+            if (!name.startsWith('stream_')) continue;
+            const dir = path.join(publicDir, name);
             try {
                 const stat = fs.statSync(dir);
                 if (!stat.isDirectory()) continue;
-                if (Date.now() - stat.mtimeMs < STREAM_MAX_AGE_MS) continue;
+                const ageMs = Date.now() - stat.mtimeMs;
+                if (ageMs < STREAM_MAX_AGE_MS) continue;
 
-                fs.rmSync(dir, { recursive: true, force: true });
+                const files = fs.readdirSync(dir);
+                for (const f of files) {
+                    try { freed += fs.statSync(path.join(dir, f)).size; } catch(_) {}
+                    try { fs.unlinkSync(path.join(dir, f)); } catch(_) {}
+                }
+                fs.rmdirSync(dir);
                 deleted++;
-            } catch(e) {}
-        }
-        if (deleted > 0) console.log(`[Cleanup] Removed ${deleted} old stream folders.`);
 
-        const now = Date.now();
-        for (const [jobId, job] of Object.entries(jobs)) {
-            if (job.completedAt && now - job.completedAt > STREAM_MAX_AGE_MS) {
-                delete jobs[jobId];
+                for (const [jid, job] of Object.entries(jobs)) {
+                    if (job.streamId === name) {
+                        delete jobs[jid];
+                        break;
+                    }
+                }
+            } catch(e) {
+                console.warn(`[Cleanup] Could not remove ${name}:`, e.message);
             }
         }
+
+        if (deleted > 0) {
+            const mb = (freed / 1024 / 1024).toFixed(1);
+            console.log(`[Cleanup] Removed ${deleted} stream(s), freed ${mb} MB`);
+        }
     } catch(e) {
-        console.error('[Cleanup] Error:', e.message);
+        console.error('[Cleanup] Error scanning public dir:', e.message);
     }
 }
 
-// ---------------------------------------------------------------------------
-// File Downloader
-// ---------------------------------------------------------------------------
-const BLOCKED_HOSTS = ['youtube.com', 'youtu.be', 'vimeo.com', 'netflix.com', 'twitch.tv', 'dailymotion.com'];
-function downloadToFile(url, destPath, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    let parsedUrl;
-    try { parsedUrl = new URL(url); } catch (e) { return reject(new Error('Invalid URL')); }
-    
-    const host = parsedUrl.hostname.replace(/^www\./, '');
-    if (BLOCKED_HOSTS.some(h => host.endsWith(h))) {
-      return reject(new Error('Direct downloads from streaming platforms are not supported.'));
-    }
-    if (redirects > 5) return reject(new Error('Too many redirects'));
-
-    const lib = parsedUrl.protocol === 'https:' ? https : httpLib;
-    const req = lib.get(url, { headers: { 'User-Agent': 'SyncTube/1.0' } }, (res) => {
-      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-        res.resume();
-        let nextUrl;
-        try {
-          nextUrl = new URL(res.headers.location, url).href;
-        } catch (e) {
-          return reject(new Error('Invalid redirect location URL'));
-        }
-        return resolve(downloadToFile(nextUrl, destPath, redirects + 1));
-      }
-      if (res.statusCode !== 200) { res.resume(); return reject(new Error('Failed to fetch URL: HTTP ' + res.statusCode)); }
-      const fileStream = fs.createWriteStream(destPath);
-      res.pipe(fileStream);
-      fileStream.on('finish', () => fileStream.close(resolve));
-      fileStream.on('error', reject);
-    });
-    req.on('error', reject);
-    req.setTimeout(30000, () => req.destroy(new Error('Download timed out')));
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Conversion Pipeline (Optimized for Speed)
-// ---------------------------------------------------------------------------
-const jobs = {};
-
-function ffprobeStreams(filePath) {
-  return new Promise((resolve, reject) => {
-    const args = ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', filePath];
-    const proc = spawn(ffprobePath, args);
-    let out = '', err = '';
-    proc.stdout.on('data', d => out += d);
-    proc.stderr.on('data', d => err += d);
-    proc.on('close', code => {
-      if (code !== 0) return reject(new Error(err || 'ffprobe failed'));
-      try { resolve(JSON.parse(out)); } catch (e) { reject(e); }
-    });
-  });
-}
-
-function extractSubtitles(inputPath, outDir, subtitleStreams) {
-  return Promise.all(subtitleStreams.map((s, i) => new Promise((resolve) => {
-    const outFile = path.join(outDir, `sub_${i}.vtt`);
-    const proc = spawn(ffmpegPath, ['-y', '-i', inputPath, '-map', `0:${s.index}`, outFile]);
-    proc.on('close', () => resolve({ file: `sub_${i}.vtt`, language: s.tags?.language || 'und', title: s.tags?.title || `Subtitle ${i + 1}` }));
-    proc.on('error', () => resolve(null));
-  }))).then(list => list.filter(Boolean));
-}
-
-function writePlaceholderPlaylist(outDir, filename) {
-  const placeholder = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n';
-  try { fs.writeFileSync(path.join(outDir, filename), placeholder); } catch (e) {}
-}
-
-function buildMasterPlaylist(outDir, audioTracks, videoRenditions) {
-  try {
-    let master = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
-    audioTracks.forEach((a, i) => {
-      const label = a.title || (a.language ? a.language.toUpperCase() : `Track ${i + 1}`);
-      const lang = a.language || 'und';
-      const def = i === 0 ? 'YES' : 'NO';
-      master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${label}",LANGUAGE="${lang}",DEFAULT=${def},AUTOSELECT=${def},URI="audio_${i}.m3u8"\n`;
-    });
-    master += '\n';
-    videoRenditions.forEach(v => {
-      master += `#EXT-X-STREAM-INF:BANDWIDTH=${v.bandwidth},AUDIO="audio"${v.resolution ? ',RESOLUTION=' + v.resolution : ''}\n${v.uri}\n`;
-    });
-    fs.writeFileSync(path.join(outDir, 'master.m3u8'), master);
-  } catch (e) {
-    console.error('[Master Playlist] Failed to write:', e.message);
-  }
-}
-
-function runAudioTrackPass(inputPath, outDir, streamIndex, trackLabel) {
-  const args = [
-    '-y', '-i', inputPath,
-    '-map', `0:${streamIndex}`, '-vn',
-    '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
-    '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
-    '-hls_flags', 'append_list',
-    '-hls_segment_filename', path.join(outDir, `segA_${trackLabel}_%03d.ts`),
-    path.join(outDir, `audio_${trackLabel}.m3u8`)
-  ];
-  return new Promise((resolve) => {
-    const proc = spawn(ffmpegPath, args);
-    let errTail = '';
-    proc.stderr.on('data', d => { errTail = (errTail + d.toString()).slice(-2000); });
-    proc.on('close', code => {
-      if (code !== 0) console.error(`[Audio track ${trackLabel}] ffmpeg exited ${code}:`, errTail.slice(-400));
-      resolve();
-    });
-    proc.on('error', (e) => { console.error(`[Audio track ${trackLabel}] spawn error:`, e.message); resolve(); });
-  });
-}
-
-function runVideoRenditionPass(jobId, outDir, inputPath, opts) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-y', '-i', inputPath,
-      '-map', '0:v:0',
-      ...opts.videoArgs,
-      '-an',
-      '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
-      '-hls_flags', 'append_list',
-      '-hls_segment_filename', path.join(outDir, `${opts.segPrefix}_%03d.ts`),
-      path.join(outDir, opts.playlistName)
-    ];
-    const proc = spawn(ffmpegPath, args);
-    let stderrBuf = '';
-    let liveSignaled = false;
-
-    const checkBuffered = () => {
-      if (liveSignaled || !opts.onBuffered) return;
-      let segs = 0;
-      try { segs = fs.readdirSync(outDir).filter(f => f.startsWith(opts.segPrefix) && f.endsWith('.ts')).length; } catch (e) {}
-      if (segs >= 3) { liveSignaled = true; opts.onBuffered(); } // Triggers playback readiness sooner (~18s instead of ~30s)
-    };
-    let segWatcher = null;
-    if (opts.onBuffered) {
-      try { segWatcher = fs.watch(outDir, () => checkBuffered()); } catch (e) {}
-    }
-    const pollHandle = opts.onBuffered ? setInterval(checkBuffered, 1500) : null;
-
-    proc.stderr.on('data', d => {
-      stderrBuf = (stderrBuf + d.toString()).slice(-20000);
-      if (opts.isPrimary && jobs[jobId]) {
-        const m = d.toString().match(/time=(\d+):(\d+):(\d+\.\d+)/);
-        if (m) jobs[jobId].lastTimeMark = `${m[1]}:${m[2]}:${m[3]}`;
-      }
-    });
-
-    const maxMs = parseInt(process.env.FFMPEG_TIMEOUT_MS, 10) || 25 * 60 * 1000;
-    const timeoutHandle = setTimeout(() => proc.kill('SIGKILL'), maxMs);
-
-    proc.on('close', (code, signal) => {
-      clearTimeout(timeoutHandle);
-      if (pollHandle) clearInterval(pollHandle);
-      if (segWatcher) segWatcher.close();
-
-      if (code === 0) return resolve();
-
-      const lines = stderrBuf.split('\n').map(l => l.trim()).filter(Boolean);
-      const errorLines = lines.filter(l => /error|invalid|failed|no such|could not|unsupported|unable to/i.test(l));
-      const relevant = (errorLines.length ? errorLines : lines.slice(-8)).slice(-8).join('\n');
-      const looksLikeSystemKill = !!signal || code > 128;
-      if (looksLikeSystemKill) {
-        return reject(new Error(
-          `Conversion was terminated unexpectedly (${signal ? 'signal ' + signal : 'exit code ' + code}), most likely from running out of memory or CPU on this server.` +
-          (errorLines.length ? `\n\nLast ffmpeg output before termination:\n${relevant}` : '')
-        ));
-      }
-      reject(new Error(`ffmpeg exited with code ${code}\n${relevant}`));
-    });
-    proc.on('error', (e) => { reject(e); });
-  });
-}
-
-async function runConversionJob(jobId, inputPath) {
-  const outDir = path.join(HLS_DIR, jobId);
-  fs.mkdirSync(outDir, { recursive: true });
-
-  try {
-    if (!jobs[jobId]) return;
-    jobs[jobId].status = 'probing';
-    const probe = await ffprobeStreams(inputPath);
-    const audioStreams = probe.streams.filter(s => s.codec_type === 'audio')
-      .map(s => ({ index: s.index, language: s.tags?.language, title: s.tags?.title }));
-    const subtitleStreams = probe.streams.filter(s => s.codec_type === 'subtitle' && s.codec_name !== 'hdmv_pgs_subtitle');
-    const videoStream = probe.streams.find(s => s.codec_type === 'video');
-
-    if (audioStreams.length === 0) throw new Error('No audio streams found in source file');
-    if (!videoStream) throw new Error('No video stream found in source file');
-
-    if (!jobs[jobId]) return;
-    jobs[jobId].status = 'extracting_subtitles';
-    jobs[jobId].subtitles = await extractSubtitles(inputPath, outDir, subtitleStreams);
-
-    if (!jobs[jobId]) return;
-    jobs[jobId].status = 'encoding';
-    jobs[jobId].masterUrl = `/hls/${jobId}/master.m3u8`;
-
-    const sourceIsH264 = videoStream.codec_name === 'h264';
-    const threads = process.env.FFMPEG_THREADS || '2';
-    
-    // ULTRAFAST preset applied here to maximize speed on 0.1 CPU
-    const sourceVideoArgs = sourceIsH264
-      ? ['-c:v', 'copy']
-      : ['-c:v', 'libx264', '-crf', '23', '-preset', 'ultrafast', '-threads', threads, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0'];
-    if (sourceIsH264) sourceVideoArgs.push('-avoid_negative_ts', 'make_zero');
-
-    const sourceBandwidth = parseInt(videoStream.bit_rate, 10)
-      || parseInt(videoStream.tags?.BPS, 10)
-      || parseInt(probe.format?.bit_rate, 10)
-      || 2000000;
-
-    const sourceWidth = parseInt(videoStream.width, 10) || 0;
-    const sourceHeight = parseInt(videoStream.height, 10) || 0;
-
-    audioStreams.forEach((a, i) => writePlaceholderPlaylist(outDir, `audio_${i}.m3u8`));
-
-    const videoRenditions = [{
-      bandwidth: sourceBandwidth,
-      uri: 'video_source.m3u8',
-      resolution: (sourceWidth && sourceHeight) ? `${sourceWidth}x${sourceHeight}` : null
-    }];
-    buildMasterPlaylist(outDir, audioStreams, videoRenditions);
-
-    const backgroundPromises = [];
-    audioStreams.forEach((a, i) => {
-      backgroundPromises.push(runAudioTrackPass(inputPath, outDir, a.index, String(i)));
-    });
-
-    const primaryPromise = runVideoRenditionPass(jobId, outDir, inputPath, {
-      videoArgs: sourceVideoArgs,
-      segPrefix: 'segV_source',
-      playlistName: 'video_source.m3u8',
-      isPrimary: true,
-      onBuffered: () => {
-        if (jobs[jobId]) {
-          jobs[jobId].status = 'streaming';
-          console.log(`[Live Stream] Job ${jobId} buffered ~18s. Client can start playback.`);
-        }
-      }
-    }).then(() => {
-      if (jobs[jobId]) {
-        jobs[jobId].status = 'done';
-        jobs[jobId].completedAt = Date.now();
-      }
-    });
-
-    const [primaryOutcome] = await Promise.allSettled([primaryPromise, Promise.allSettled(backgroundPromises)]);
-    if (primaryOutcome.status === 'rejected') throw primaryOutcome.reason;
-
-  } catch (err) {
-    if (jobs[jobId]) {
-      jobs[jobId].status = 'error';
-      jobs[jobId].error = err.message;
-      jobs[jobId].completedAt = Date.now();
-    }
-    fs.rm(outDir, { recursive: true, force: true }, () => {});
-  } finally {
-    fs.rm(inputPath, { force: true }, () => {});
-  }
-}
-
-function safeExtensionFromUrl(url) {
-  const FALLBACK = 'mp4';
-  try {
-    const pathname = new URL(url).pathname;
-    const match = pathname.match(/\.([a-zA-Z0-9]{2,5})$/);
-    return match ? match[1].toLowerCase() : FALLBACK;
-  } catch (e) {
-    return FALLBACK;
-  }
-}
-
-app.post('/api/convert-from-url', async (req, res) => {
-  const { url } = req.body || {};
-  if (!url) return res.status(400).json({ error: 'Missing url' });
-
-  const jobId = crypto.randomBytes(6).toString('hex');
-  jobs[jobId] = { status: 'queued', createdAt: Date.now() };
-  res.json({ jobId });
-
-  const ext = safeExtensionFromUrl(url);
-  const destPath = path.join(UPLOAD_DIR, `${jobId}.${ext}`);
-  try {
-    if (jobs[jobId]) jobs[jobId].status = 'downloading';
-    await downloadToFile(url, destPath);
-    runConversionJob(jobId, destPath);
-  } catch (err) {
-    if (jobs[jobId]) {
-      jobs[jobId].status = 'error';
-      jobs[jobId].error = err.message;
-      jobs[jobId].completedAt = Date.now();
-    }
-  }
-});
-
-app.get('/api/convert/status/:jobId', (req, res) => {
-  const job = jobs[req.params.jobId];
-  if (!job) return res.status(404).json({ error: 'Unknown job' });
-  res.json(job);
-});
-
-// ---------------------------------------------------------------------------
-// Room State & Socket Handling
-// ---------------------------------------------------------------------------
-const roomsData = {};
 cleanOldStreams();
 setInterval(cleanOldStreams, CLEANUP_INTERVAL_MS);
 
-function broadcastActiveRooms() {
-  const activeRooms = Object.keys(roomsData)
-    .filter(roomId => roomsData[roomId].count > 0)
-    .map(roomId => ({ roomId, count: roomsData[roomId].count }));
-  io.emit('active-rooms', activeRooms);
-}
-
-function currentPlaybackTime(room) {
-  if (!room.playbackState || room.playbackState !== 'playing') return room.currentVideoTime || 0;
-  const elapsed = (Date.now() - (room.lastUpdatedAt || Date.now())) / 1000;
-  return (room.currentVideoTime || 0) + elapsed;
-}
-
-async function broadcastRoomState(roomId) {
-  const room = roomsData[roomId];
-  if (!room) return;
-  const sockets = await io.in(roomId).fetchSockets();
-  sockets.forEach(s => {
-    s.emit('room-info', { count: room.count, queue: room.queue, isAdmin: room.admin === s.id });
-  });
-  const memberList = Object.entries(room.members).map(([id, username]) => ({ id, username, isHost: id === room.admin }));
-  io.to(roomId).emit('members-update', memberList);
-}
-
-io.on('connection', (socket) => {
-  let currentRoom = null;
-  let currentUser = null;
-
-  broadcastActiveRooms();
-
-  socket.on('join-room', (data) => {
-    const roomId = data.roomId;
-    const username = (data.username || "Guest").slice(0, 20);
-
-    currentRoom = roomId;
-    currentUser = username;
-    socket.join(roomId);
-
-    if (!roomsData[roomId]) {
-      roomsData[roomId] = {
-        count: 0, admin: socket.id, members: {}, queue: [], voiceUsers: new Set(),
-        sourceType: 'none', currentVideoId: null, currentRawUrl: null, currentRawTitle: null,
-        currentRawSubtitles: null, autoplayNext: true,
-        currentVideoTime: 0, playbackState: 'paused', lastUpdatedAt: Date.now()
-      };
-    }
-    const room = roomsData[roomId];
-    room.count++;
-    room.members[socket.id] = username;
-    
-    socket.emit('room-info', { count: room.count, queue: room.queue, isAdmin: room.admin === socket.id, autoplayNext: room.autoplayNext });
-
-    broadcastActiveRooms();
-    broadcastRoomState(roomId);
-
-    socket.emit('initial-sync', {
-      sourceType: room.sourceType, videoId: room.currentVideoId, rawUrl: room.currentRawUrl,
-      title: room.currentRawTitle, time: currentPlaybackTime(room), playbackState: room.playbackState,
-      subtitles: room.currentRawSubtitles
-    });
-
-    io.to(roomId).emit('chat-message', { type: 'system', text: `${username.toUpperCase()} JOINED THE ROOM`, timestamp: Date.now() });
-  });
-
-  socket.on('video-command', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room || room.admin !== socket.id) return;
-
-    if (data.type === 'play') { room.playbackState = 'playing'; room.lastUpdatedAt = Date.now(); }
-    if (data.type === 'pause') { room.currentVideoTime = currentPlaybackTime(room); room.playbackState = 'paused'; room.lastUpdatedAt = Date.now(); }
-    if (data.type === 'seek') { room.currentVideoTime = data.time; room.lastUpdatedAt = Date.now(); room.playbackState = 'playing'; }
-    if (data.type === 'change') {
-      room.sourceType = 'youtube'; room.currentVideoId = data.videoId; room.currentRawUrl = null; room.currentRawTitle = null;
-      room.currentVideoTime = 0; room.playbackState = 'playing'; room.lastUpdatedAt = Date.now();
-    }
-    if (data.type === 'change-raw') {
-      room.sourceType = 'raw'; room.currentRawUrl = data.url; room.currentRawTitle = data.title || null; room.currentVideoId = null;
-      room.currentRawSubtitles = data.subtitles || null;
-      room.currentVideoTime = 0; room.playbackState = 'playing'; room.lastUpdatedAt = Date.now();
-    }
-    socket.to(data.roomId).emit('sync-video', data);
-  });
-
-  socket.on('set-autoplay-next', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room || room.admin !== socket.id) return;
-    room.autoplayNext = !!data.enabled;
-    io.to(data.roomId).emit('autoplay-next-changed', room.autoplayNext);
-  });
-
-  socket.on('send-reaction', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room) return;
-    const ALLOWED = ['❤️', '😂', '😮', '👏', '🔥', '👍'];
-    if (!ALLOWED.includes(data.emoji)) return;
-    const username = room.members[socket.id] || 'Guest';
-    io.to(data.roomId).emit('reaction', { emoji: data.emoji, user: username });
-  });
-
-  socket.on('add-to-queue', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room) return;
-    room.queue.push(data.video);
-    io.to(data.roomId).emit('queue-update', room.queue);
-  });
-
-  socket.on('pop-queue', (roomId) => {
-    const room = roomsData[roomId];
-    if (room && room.admin === socket.id && room.queue.length > 0) {
-      room.queue.shift();
-      io.to(roomId).emit('queue-update', room.queue);
-    }
-  });
-
-  socket.on('clear-queue', (roomId) => {
-    const room = roomsData[roomId];
-    if (room && room.admin === socket.id) {
-      room.queue = [];
-      io.to(roomId).emit('queue-update', room.queue);
-    }
-  });
-
-  socket.on('reorder-queue', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room || room.admin !== socket.id) return;
-    const { from, to } = data;
-    if (typeof from !== 'number' || typeof to !== 'number') return;
-    if (from < 0 || from >= room.queue.length || to < 0 || to >= room.queue.length) return;
-    const item = room.queue.splice(from, 1)[0];
-    room.queue.splice(to, 0, item);
-    io.to(data.roomId).emit('queue-update', room.queue);
-  });
-
-  socket.on('chat-message', (data) => {
-    io.to(data.roomId).emit('chat-message', { type: 'user', user: data.user, text: data.text, timestamp: Date.now() });
-  });
-
-  socket.on('typing', (data) => {
-    socket.to(data.roomId).emit('typing', { user: data.user, isTyping: data.isTyping });
-  });
-
-  socket.on('transfer-host', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room || room.admin !== socket.id) return;
-    if (!room.members[data.targetId]) return;
-    room.admin = data.targetId;
-    broadcastRoomState(data.roomId);
-    io.to(data.roomId).emit('chat-message', { type: 'system', text: `${room.members[data.targetId].toUpperCase()} IS NOW HOST`, timestamp: Date.now() });
-  });
-
-  socket.on('voice-join', (data) => {
-    if (roomsData[data.roomId]) {
-      roomsData[data.roomId].voiceUsers.add(data.user);
-      io.to(data.roomId).emit('voice-participants', Array.from(roomsData[data.roomId].voiceUsers));
-    }
-  });
-
-  socket.on('voice-leave', (data) => {
-    if (roomsData[data.roomId]) {
-      roomsData[data.roomId].voiceUsers.delete(data.user);
-      io.to(data.roomId).emit('voice-participants', Array.from(roomsData[data.roomId].voiceUsers));
-    }
-  });
-
-  socket.on('voice-speaking', (data) => {
-    socket.to(data.roomId).emit('voice-speaking', { user: data.user, speaking: data.speaking });
-  });
-
-  socket.on('voice-chunk', (data) => {
-    socket.to(data.roomId).emit('voice-chunk', { user: data.user, data: data.data });
-  });
-
-  socket.on('disconnect', () => {
-    const room = roomsData[currentRoom];
-    if (!room) return;
-
-    room.count--;
-    delete room.members[socket.id];
-
-    if (currentUser && room.voiceUsers.has(currentUser)) {
-      room.voiceUsers.delete(currentUser);
-      io.to(currentRoom).emit('voice-participants', Array.from(room.voiceUsers));
-    }
-    if (currentUser) {
-      io.to(currentRoom).emit('chat-message', { type: 'system', text: `${currentUser.toUpperCase()} LEFT THE ROOM`, timestamp: Date.now() });
-    }
-    if (room.count > 0 && room.admin === socket.id) {
-      const remainingIds = Object.keys(room.members);
-      if (remainingIds.length > 0) room.admin = remainingIds[0];
-    }
-    if (room.count <= 0) delete roomsData[currentRoom];
-    else broadcastRoomState(currentRoom);
-    broadcastActiveRooms();
-  });
+// Manual cleanup endpoint
+app.post('/api/cleanup', (req, res) => {
+    cleanOldStreams();
+    const dirs = fs.readdirSync(publicDir).filter(n => n.startsWith('stream_')).length;
+    res.json({ status: 'ok', remainingStreams: dirs });
 });
 
-// ---------------------------------------------------------------------------
-// Complete System Diagnostic Endpoint
-// ---------------------------------------------------------------------------
-app.get('/api/diagnostic', (req, res) => {
-    const memUsage = process.memoryUsage();
-    const formatBytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-
-    const jobStats = { total: 0, queued: 0, downloading: 0, encoding: 0, streaming: 0, done: 0, error: 0 };
-    Object.values(jobs).forEach(job => {
-        jobStats.total++;
-        if (jobStats[job.status] !== undefined) jobStats[job.status]++;
-    });
-
-    const roomStats = { totalRooms: 0, totalUsers: 0, totalVoiceUsers: 0 };
-    const activeRoomsDetails = {};
-    
-    Object.entries(roomsData).forEach(([roomId, room]) => {
-        roomStats.totalRooms++;
-        roomStats.totalUsers += room.count;
-        roomStats.totalVoiceUsers += room.voiceUsers.size;
-        
-        activeRoomsDetails[roomId] = {
-            users: room.count,
-            voiceUsers: room.voiceUsers.size,
-            sourceType: room.sourceType,
-            playbackState: room.playbackState
-        };
-    });
-
-    let hlsFolderCount = 0;
+// Disk usage endpoint
+app.get('/api/disk', (req, res) => {
     try {
-        hlsFolderCount = fs.readdirSync(HLS_DIR).filter(f => fs.statSync(path.join(HLS_DIR, f)).isDirectory()).length;
-    } catch (e) {
-        hlsFolderCount = 'Error reading directory';
+        let totalBytes = 0;
+        const streams = [];
+        for (const name of fs.readdirSync(publicDir)) {
+            if (!name.startsWith('stream_')) continue;
+            const dir = path.join(publicDir, name);
+            let size = 0;
+            try {
+                for (const f of fs.readdirSync(dir)) {
+                    try { size += fs.statSync(path.join(dir, f)).size; } catch(_) {}
+                }
+            } catch(_) {}
+            const ageMins = Math.round((Date.now() - fs.statSync(dir).mtimeMs) / 60000);
+            totalBytes += size;
+            streams.push({ name, sizeMb: (size/1024/1024).toFixed(1), ageMins });
+        }
+        res.json({
+            totalMb: (totalBytes/1024/1024).toFixed(1),
+            streamCount: streams.length,
+            streams: streams.sort((a,b) => b.ageMins - a.ageMins)
+        });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Keep-Alive Route
+app.get('/', (req, res) => {
+    res.status(200).send('SyncTube Backend is Awake and Running! 🚀');
+});
+
+// In-memory job store
+const jobs = {};
+const LIVE_START_SEGMENTS = 5;
+
+// --- Conversion Endpoint ---
+app.post('/api/convert', (req, res) => {
+    const { videoUrl } = req.body;
+
+    if (!videoUrl || typeof videoUrl !== 'string') {
+        return res.status(400).json({ error: 'Valid Video URL required' });
+    }
+    try {
+        new URL(videoUrl);
+    } catch (_) {
+        return res.status(400).json({ error: 'Invalid URL format' });
     }
 
-    res.json({
-        server: {
-            uptime_seconds: Math.floor(process.uptime()),
-            memory: {
-                rss: formatBytes(memUsage.rss),
-                heapTotal: formatBytes(memUsage.heapTotal),
-                heapUsed: formatBytes(memUsage.heapUsed),
+    const jobId    = `job_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    const streamId = `stream_${Date.now()}`;
+    const streamDir = path.join(publicDir, streamId);
+    if (!fs.existsSync(streamDir)) fs.mkdirSync(streamDir, { recursive: true });
+
+    const outputPath = path.join(streamDir, 'playlist.m3u8');
+
+    jobs[jobId] = {
+        status: 'pending',
+        streamId,
+        streamDir,
+        manifestUrl: `/public/${streamId}/playlist.m3u8`,
+        startedAt: Date.now(),
+        segments: 0
+    };
+
+    res.json({ status: 'queued', jobId });
+
+    let numAudio = 1;
+    let videoTitle = '';
+    let videoDuration = 0;
+    let audioLangs = [];
+
+    try {
+        const probeJson = execSync(
+            `ffprobe -v quiet -print_format json -show_format -show_streams "${videoUrl.replace(/"/g,'\\"')}"`,
+            { timeout: 20000 }
+        ).toString();
+        const probe = JSON.parse(probeJson);
+
+        videoTitle = probe.format?.tags?.title || probe.format?.tags?.TITLE || '';
+        videoDuration = parseFloat(probe.format?.duration || 0);
+
+        const audioStreams = (probe.streams || []).filter(s => s.codec_type === 'audio');
+        numAudio = audioStreams.length || 1;
+        audioLangs = audioStreams.map((s, i) => {
+            const lang = s.tags?.language || s.tags?.LANGUAGE || '';
+            const title = s.tags?.title || s.tags?.TITLE || '';
+            const langMap = { eng:'English', hin:'Hindi', jpn:'Japanese', tam:'Tamil',
+                              tel:'Telugu', fra:'French', spa:'Spanish', kor:'Korean',
+                              ara:'Arabic', por:'Portuguese', deu:'German', zho:'Chinese' };
+            const label = title || langMap[lang] || (lang ? lang.toUpperCase() : `Track ${i+1}`);
+            return { index: i, lang, label };
+        });
+    } catch(e) {
+        console.log('[Probe] ffprobe failed:', e.message);
+    }
+
+    jobs[jobId].title = videoTitle;
+    jobs[jobId].duration = videoDuration;
+    jobs[jobId].audioLangs = audioLangs;
+
+    const thumbPath = path.join(streamDir, 'thumb.jpg');
+    try {
+        execSync(
+            `ffmpeg -y -ss 10 -i "${videoUrl.replace(/"/g,'\\"')}" -frames:v 1 -q:v 2 -vf scale=320:-1 "${thumbPath}"`,
+            { timeout: 25000 }
+        );
+        jobs[jobId].thumbUrl = `/public/${streamId}/thumb.jpg`;
+    } catch(e) {
+        console.log('[Thumb] Thumbnail generation failed:', e.message);
+    }
+
+    const buildMasterPlaylist = () => {
+        try {
+            let master = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
+            for (let i = 0; i < numAudio; i++) {
+                const label = audioLangs[i]?.label || `Track ${i+1}`;
+                const lang  = audioLangs[i]?.lang  || 'und';
+                const def   = i === 0 ? 'YES' : 'NO';
+                const uri   = i === 0 ? 'stream_0.m3u8' : `stream_${i}.m3u8`;
+                master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${label}",LANGUAGE="${lang}",DEFAULT=${def},AUTOSELECT=${def},URI="${uri}"\n`;
             }
-        },
-        storage: {
-            active_hls_stream_folders: hlsFolderCount,
-            stream_max_age_hours: STREAM_MAX_AGE_MS / 1000 / 60 / 60
-        },
-        conversion_jobs: jobStats,
-        websockets: {
-            ...roomStats,
-            rooms: activeRoomsDetails
+            master += `\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,AUDIO="audio"\nstream_0.m3u8\n`;
+            fs.writeFileSync(path.join(streamDir, 'playlist.m3u8'), master);
+        } catch(e) {
+            console.error('[Master] Failed to write master playlist:', e.message);
+        }
+    };
+
+    if (numAudio <= 1) {
+        const args = [
+            '-y',
+            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            '-headers', 'Referer: https://www.google.com/\r\nAccept: */*\r\nAccept-Language: en-US,en;q=0.9\r\n',
+            '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+            '-i', videoUrl,
+            '-map', '0:v:0', '-map', '0:a:0',
+            '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+            '-max_muxing_queue_size', '9999',
+            '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+            '-hls_flags', 'append_list',
+            '-hls_segment_filename', path.join(streamDir, 'seg_%03d.ts'),
+            outputPath
+        ];
+
+        const proc = spawn('ffmpeg', args);
+        const segWatcher = fs.watch(streamDir, (event, filename) => {
+            if (filename && filename.endsWith('.ts')) {
+                const segs = fs.readdirSync(streamDir).filter(f => f.endsWith('.ts')).length;
+                jobs[jobId].segments = segs;
+                if (jobs[jobId].status === 'pending' && segs >= LIVE_START_SEGMENTS) {
+                    jobs[jobId].status = 'live';
+                }
+            }
+        });
+
+        let ffmpegBuffer = '';
+        proc.stderr.on('data', d => {
+            ffmpegBuffer += d.toString();
+            const lines = ffmpegBuffer.split('\r');
+            ffmpegBuffer = lines.pop();
+            for (const line of lines) {
+                if (!line.includes('time=')) continue;
+                const m = line.match(/time=([\d:]+\.?\d*)/);
+                if (m) {
+                    const parts = m[1].split(':').map(Number);
+                    const secs = parts.length === 3 ? parts[0]*3600 + parts[1]*60 + parts[2] : parts[0]*60 + parts[1];
+                    jobs[jobId].progress = {
+                        currentTime: secs,
+                        duration: jobs[jobId].duration || 0,
+                        pct: jobs[jobId].duration > 0 ? Math.min(99, Math.round((secs / jobs[jobId].duration) * 100)) : null
+                    };
+                }
+            }
+        });
+
+        proc.on('close', code => {
+            segWatcher.close();
+            if (code === 0) jobs[jobId].status = 'done';
+            else if (jobs[jobId]?.status === 'pending') {
+                jobs[jobId].status = 'error';
+                jobs[jobId].error = `FFmpeg exited with code ${code}`;
+            }
+        });
+
+        proc.on('error', err => {
+            segWatcher.close();
+            if (jobs[jobId].status === 'pending') {
+                jobs[jobId].status = 'error';
+                jobs[jobId].error = err.message;
+            }
+        });
+        return;
+    }
+
+    const commonInput = [
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        '-headers', 'Referer: https://www.google.com/\r\nAccept: */*\r\nAccept-Language: en-US,en;q=0.9\r\n',
+        '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+        '-i', videoUrl
+    ];
+
+    const args = [
+        '-y',
+        ...commonInput,
+        '-map', '0:v:0', '-map', '0:a:0',
+        '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+        '-max_muxing_queue_size', '9999',
+        '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+        '-hls_flags', 'append_list',
+        '-hls_segment_filename', path.join(streamDir, 'seg_0_%03d.ts'),
+        path.join(streamDir, 'stream_0.m3u8')
+    ];
+
+    for (let i = 1; i < numAudio; i++) {
+        const aArgs = [
+            '-y',
+            ...commonInput,
+            '-map', `0:a:${i}`,
+            '-vn',
+            '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+            '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+            '-hls_flags', 'append_list',
+            '-hls_segment_filename', path.join(streamDir, `seg_${i}_%03d.ts`),
+            path.join(streamDir, `stream_${i}.m3u8`)
+        ];
+        const aProc = spawn('ffmpeg', aArgs);
+        aProc.stderr.on('data', () => {});
+    }
+
+    buildMasterPlaylist();
+
+    const proc = spawn('ffmpeg', args);
+    const segWatcher = fs.watch(streamDir, (event, filename) => {
+        if (filename && filename.endsWith('.ts')) {
+            const segs = fs.readdirSync(streamDir).filter(f => f.endsWith('.ts')).length;
+            jobs[jobId].segments = segs;
+            if (jobs[jobId].status === 'pending' && segs >= LIVE_START_SEGMENTS) {
+                jobs[jobId].status = 'live';
+            }
+        }
+    });
+
+    let ffmpegBuffer = '';
+    proc.stderr.on('data', d => {
+        ffmpegBuffer += d.toString();
+        const lines = ffmpegBuffer.split('\r');
+        ffmpegBuffer = lines.pop();
+        for (const line of lines) {
+            if (!line.includes('time=')) continue;
+            const m = line.match(/time=([\d:]+\.?\d*)/);
+            if (m) {
+                const parts = m[1].split(':').map(Number);
+                const secs = parts.length === 3 ? parts[0]*3600 + parts[1]*60 + parts[2] : parts[0]*60 + parts[1];
+                jobs[jobId].progress = {
+                    currentTime: secs,
+                    duration: jobs[jobId].duration || 0,
+                    pct: jobs[jobId].duration > 0 ? Math.min(99, Math.round((secs / jobs[jobId].duration) * 100)) : null
+                };
+            }
+        }
+    });
+
+    proc.on('close', code => {
+        segWatcher.close();
+        if (code === 0) {
+            if (numAudio > 1) buildMasterPlaylist();
+            jobs[jobId].status = 'done';
+        } else if (jobs[jobId]?.status === 'pending') {
+            jobs[jobId].status = 'error';
+            jobs[jobId].error = `FFmpeg exited with code ${code}`;
+        }
+    });
+
+    proc.on('error', err => {
+        segWatcher.close();
+        if (jobs[jobId].status === 'pending') {
+            jobs[jobId].status = 'error';
+            jobs[jobId].error = err.message;
         }
     });
 });
 
-// SPA fallback for any unmatched GET route.
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+app.get('/api/convert/status/:jobId', (req, res) => {
+    const job = jobs[req.params.jobId];
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    if (job.status === 'live' || job.status === 'done') {
+        return res.json({
+            status: 'Success',
+            manifestUrl: job.manifestUrl,
+            segments: job.segments,
+            live: job.status === 'live',
+            title: job.title || '',
+            duration: job.duration || 0,
+            audioLangs: job.audioLangs || [],
+            thumbUrl: job.thumbUrl ? `https://${req.headers.host}${job.thumbUrl}` : ''
+        });
+    }
+    if (job.status === 'error') {
+        return res.json({ status: 'Error', error: job.error });
+    }
+    res.json({
+        status: 'pending',
+        segments: job.segments || 0,
+        progress: job.progress || null,
+        title: job.title || '',
+        duration: job.duration || 0
+    });
+});
+
+app.get('/api/health', (req, res) => {
+    try {
+        const ver = execSync('ffmpeg -version 2>&1').toString().split('\n')[0];
+        res.json({ status: 'ok', ffmpeg: ver });
+    } catch (e) {
+        res.status(500).json({ status: 'error', ffmpeg: 'NOT FOUND' });
+    }
+});
+
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
+const rooms = {};
+
+io.on('connection', (socket) => {
+    emitActiveRooms();
+
+    socket.on('join_room', (data, callback) => {
+        const { roomId, roomName, password, username, userId, photo } = data;
+
+        if (rooms[roomId] && rooms[roomId].password && rooms[roomId].password !== password) {
+            return callback({ success: false, message: "Incorrect password." });
+        }
+
+        if (!rooms[roomId]) {
+            rooms[roomId] = {
+                id: roomId, name: roomName, password: password || null,
+                host: null, users: [], playlist: [], currentVideo: null
+            };
+        }
+
+        const room = rooms[roomId];
+        const existingUserIndex = room.users.findIndex(u => u.userId === userId);
+        let assignHost = false;
+        let assignCoHost = false;
+        let isARefresh = false;
+
+        if (existingUserIndex !== -1) {
+            isARefresh = true;
+            const oldUserInstance = room.users[existingUserIndex];
+            if (oldUserInstance.timeoutId) clearTimeout(oldUserInstance.timeoutId);
+
+            assignHost = oldUserInstance.isHost;
+            assignCoHost = oldUserInstance.isCoHost;
+            room.users.splice(existingUserIndex, 1);
+        } else if (room.users.filter(u => !u.isPendingRemoval).length === 0) {
+            assignHost = true;
+        }
+
+        const userObj = { 
+            socketId: socket.id, 
+            userId, 
+            username, 
+            photo, 
+            isHost: assignHost, 
+            isCoHost: assignCoHost,
+            isPendingRemoval: false,
+            timeoutId: null 
+        };
+
+        room.users.push(userObj);
+        if (assignHost) room.host = socket.id;
+
+        socket.join(roomId);
+        callback({ success: true });
+
+        socket.emit('room_data', { isHost: assignHost, isCoHost: assignCoHost, playlist: room.playlist, currentVideo: room.currentVideo });
+        io.to(roomId).emit('update_users', room.users.filter(u => !u.isPendingRemoval));
+
+        if (!isARefresh) {
+            io.to(roomId).emit('chat_message', { system: true, text: `${username} joined the party 🍿` });
+        }
+        emitActiveRooms();
+    });
+
+    socket.on('transfer_host', (data) => {
+        const room = rooms[data.roomId];
+        if (room && room.host === socket.id) {
+            room.host = data.targetId;
+            room.users.forEach(u => {
+                if (u.socketId === socket.id) u.isHost = false;
+                if (u.socketId === data.targetId) { u.isHost = true; u.isCoHost = false; }
+            });
+            io.to(data.roomId).emit('update_users', room.users.filter(u => !u.isPendingRemoval));
+            io.to(data.roomId).emit('chat_message', { system: true, text: `👑 The Host Crown was transferred!` });
+        }
+    });
+
+    socket.on('toggle_cohost', (data) => {
+        const room = rooms[data.roomId];
+        if (room && room.host === socket.id) {
+            const targetUser = room.users.find(u => u.socketId === data.targetId);
+            if (targetUser) {
+                targetUser.isCoHost = !targetUser.isCoHost;
+                io.to(data.roomId).emit('update_users', room.users.filter(u => !u.isPendingRemoval));
+                const msg = targetUser.isCoHost ? `⭐ ${targetUser.username} was granted Co-Host power!` : `🔒 ${targetUser.username}'s Co-Host power was revoked.`;
+                io.to(data.roomId).emit('chat_message', { system: true, text: msg });
+            }
+        }
+    });
+
+    socket.on('change_video', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (room && user && (user.isHost || user.isCoHost)) {
+            room.currentVideo = { src: data.src, name: data.name, index: data.index, time: 0, state: 1 };
+            io.to(data.roomId).emit('load_video', room.currentVideo);
+        }
+    });
+
+    socket.on('set_speed', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (room && user && (user.isHost || user.isCoHost)) {
+            room.currentSpeed = data.speed;
+            socket.to(data.roomId).emit('sync_speed', { speed: data.speed });
+        }
+    });
+
+    socket.on('private_dm', (data) => {
+        const room = rooms[data.roomId];
+        const sender = room?.users.find(u => u.socketId === socket.id);
+        if (!room || !sender) return;
+        const target = room.users.find(u => u.socketId === data.targetSocketId);
+        if (!target) return;
+        io.to(data.targetSocketId).emit('private_dm', {
+            fromSocketId: socket.id,
+            fromName: sender.username,
+            fromPhoto: sender.photo,
+            text: data.text,
+            ts: Date.now()
+        });
+    });
+
+    socket.on('wl_suggest', (data) => {
+        const room = rooms[data.roomId];
+        if (!room) return;
+        if (!room.watchlist) room.watchlist = [];
+        const item = { id: Date.now(), url: data.url, title: data.title, thumb: data.thumb, suggestedBy: data.username };
+        room.watchlist.push(item);
+        io.to(data.roomId).emit('wl_update', room.watchlist);
+    });
+
+    socket.on('wl_approve', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (!room || !(user?.isHost || user?.isCoHost)) return;
+        const item = room.watchlist?.find(w => w.id === data.id);
+        if (!item) return;
+        room.watchlist = room.watchlist.filter(w => w.id !== data.id);
+        io.to(data.roomId).emit('wl_update', room.watchlist);
+        io.to(data.roomId).emit('wl_approved', item);
+    });
+
+    socket.on('wl_reject', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (!room || !(user?.isHost || user?.isCoHost)) return;
+        room.watchlist = (room.watchlist || []).filter(w => w.id !== data.id);
+        io.to(data.roomId).emit('wl_update', room.watchlist);
+    });
+
+    socket.on('get_watchlist', (data) => {
+        const room = rooms[data.roomId];
+        if (room) socket.emit('wl_update', room.watchlist || []);
+    });
+
+    socket.on('save_resume', (data) => {
+        const room = rooms[data.roomId];
+        if (!room) return;
+        if (!room.resumePoints) room.resumePoints = {};
+        room.resumePoints[`${data.userId}_${data.url}`] = { time: data.time, ts: Date.now() };
+    });
+
+    socket.on('get_resume', (data) => {
+        const room = rooms[data.roomId];
+        if (!room) return;
+        const key = `${data.userId}_${data.url}`;
+        const point = room.resumePoints?.[key];
+        socket.emit('resume_point', { url: data.url, time: point?.time || 0 });
+    });
+
+    socket.on('update_playlist', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (room && user && (user.isHost || user.isCoHost)) {
+            room.playlist = data.playlist;
+            socket.to(data.roomId).emit('sync_playlist', room.playlist);
+        }
+    });
+
+    socket.on('play_video', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (room && user && (user.isHost || user.isCoHost)) socket.to(data.roomId).emit('sync_play', data.time);
+    });
+
+    socket.on('pause_video', (data) => {
+        const room = rooms[data.roomId];
+        const user = room?.users.find(u => u.socketId === socket.id);
+        if (room && user && (user.isHost || user.isCoHost)) socket.to(data.roomId).emit('sync_pause', data.time);
+    });
+
+    socket.on('broadcast_sync_data', (data) => {
+        const room = rooms[data.roomId];
+        if (room && room.host === socket.id) {
+            if (room.currentVideo) {
+                room.currentVideo.time = data.time;
+                room.currentVideo.state = data.state;
+            }
+            socket.to(data.roomId).emit('host_send_sync', { time: data.time, state: data.state });
+        }
+    });
+
+    socket.on('chat_message', (data) => { if (rooms[data.roomId]) io.to(data.roomId).emit('chat_message', data); });
+    socket.on('voice_join', (data) => { socket.to(data.roomId).emit('voice_user_joined', { socketId: socket.id }); });
+    socket.on('webrtc_offer', (data) => { io.to(data.target).emit('webrtc_offer', { sender: socket.id, sdp: data.sdp }); });
+    socket.on('webrtc_answer', (data) => { io.to(data.target).emit('webrtc_answer', { sender: socket.id, sdp: data.sdp }); });
+    socket.on('webrtc_ice', (data) => { io.to(data.target).emit('webrtc_ice', { sender: socket.id, candidate: data.candidate }); });
+
+    socket.on('disconnect', () => {
+        for (const roomId in rooms) {
+            const room = rooms[roomId];
+            const userIndex = room.users.findIndex(u => u.socketId === socket.id);
+
+            if (userIndex !== -1) {
+                const user = room.users[userIndex];
+                socket.to(roomId).emit('voice_user_left', { socketId: socket.id });
+
+                user.isPendingRemoval = true;
+
+                user.timeoutId = setTimeout(() => {
+                    const currentRoom = rooms[roomId];
+                    if (currentRoom) {
+                        const freshInstance = currentRoom.users.find(u => u.userId === user.userId && !u.isPendingRemoval);
+
+                        if (!freshInstance) {
+                            currentRoom.users = currentRoom.users.filter(u => u.userId !== user.userId);
+                            io.to(roomId).emit('chat_message', { system: true, text: `${user.username} left the party 👋` });
+
+                            if (user.isHost && currentRoom.users.length > 0) {
+                                currentRoom.host = currentRoom.users[0].socketId;
+                                currentRoom.users[0].isHost = true;
+                                currentRoom.users[0].isCoHost = false;
+                                io.to(roomId).emit('chat_message', { system: true, text: `👑 ${currentRoom.users[0].username} is the new Room Host` });
+                                io.to(currentRoom.host).emit('you_are_host');
+                                io.to(currentRoom.host).emit('host_transferred', { reason: 'disconnect' });
+                            }
+
+                            io.to(roomId).emit('update_users', currentRoom.users.filter(u => !u.isPendingRemoval));
+                        }
+
+                        if (currentRoom.users.length === 0) {
+                            delete rooms[roomId];
+                        }
+                    }
+                    emitActiveRooms();
+                }, 3000);
+
+                io.to(roomId).emit('update_users', room.users.filter(u => !u.isPendingRemoval));
+                break;
+            }
+        }
+    });
+
+    function emitActiveRooms() {
+        const publicRooms = Object.values(rooms)
+            .filter(r => !r.password)
+            .map(r => ({ 
+                id: r.id, 
+                name: r.name, 
+                users: r.users.filter(u => !u.isPendingRemoval).length 
+            }));
+        io.emit('active_rooms', publicRooms);
+    }
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`SyncTube Pro Server running on port ${PORT}`);
-});
+server.listen(PORT, () => { console.log(`✅ SyncTube Server running on port ${PORT}`); });
