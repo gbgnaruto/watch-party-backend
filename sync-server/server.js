@@ -6,7 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
 const httpLib = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static').path;
 
@@ -23,8 +23,7 @@ app.use(express.json());
 app.use('/hls', express.static(HLS_DIR));
 
 // ---------------------------------------------------------------------------
-// UPGRADE 1: Auto-Disk Cleanup (Prevents the server from crashing when full)
-// Deletes converted streams older than 4 hours every 30 minutes.
+// Disk Cleanup: Purge streams older than 4 hours every 30 minutes
 // ---------------------------------------------------------------------------
 const STREAM_MAX_AGE_MS = 4 * 60 * 60 * 1000; 
 const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;    
@@ -53,7 +52,7 @@ cleanOldStreams();
 setInterval(cleanOldStreams, CLEANUP_INTERVAL_MS);
 
 // ---------------------------------------------------------------------------
-// Downloader
+// File Downloader
 // ---------------------------------------------------------------------------
 const BLOCKED_HOSTS = ['youtube.com', 'youtu.be', 'vimeo.com', 'netflix.com', 'twitch.tv', 'dailymotion.com'];
 function downloadToFile(url, destPath, redirects = 0) {
@@ -83,7 +82,7 @@ function downloadToFile(url, destPath, redirects = 0) {
 }
 
 // ---------------------------------------------------------------------------
-// Conversion pipeline
+// Conversion Pipeline (App 2 Logic Integrated)
 // ---------------------------------------------------------------------------
 const jobs = {};
 
@@ -101,39 +100,6 @@ function ffprobeStreams(filePath) {
   });
 }
 
-function buildFfmpegArgs(inputPath, outDir, audioStreams) {
-  const args = ['-y', '-i', inputPath];
-  args.push('-map', '0:v:0');
-  audioStreams.forEach(a => args.push('-map', `0:${a.index}`));
-
-  // UPGRADE 2: Zero-CPU Fast Copy (-c:v copy)
-  // Instead of re-encoding the video, we just slice it instantly. Blazing fast.
-  args.push('-c:v', 'copy');
-  
-  audioStreams.forEach((a, i) => args.push(`-c:a:${i}`, 'aac', `-b:a:${i}`, '192k', `-ac:${i}`, '2'));
-
-  const streamMapParts = [];
-  streamMapParts.push('v:0,name:source,agroup:aud');
-
-  audioStreams.forEach((a, ai) => {
-    const safeLang = (a.language || 'und').replace(/[^a-zA-Z0-9]/g, '');
-    streamMapParts.push(`a:${ai},agroup:aud,language:${safeLang}${ai === 0 ? ',default:YES' : ''}`);
-  });
-
-  args.push(
-    '-var_stream_map', streamMapParts.join(' '),
-    '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0', 
-    
-    // Added append_list so hls.js knows segments are continuously being added
-    '-hls_flags', 'independent_segments+append_list', 
-    
-    '-master_pl_name', 'master.m3u8',
-    '-hls_segment_filename', path.join(outDir, 'stream_%v_data%03d.ts'),
-    path.join(outDir, 'stream_%v.m3u8')
-  );
-  return args;
-}
-
 function extractSubtitles(inputPath, outDir, subtitleStreams) {
   return Promise.all(subtitleStreams.map((s, i) => new Promise((resolve) => {
     const outFile = path.join(outDir, `sub_${i}.vtt`);
@@ -141,6 +107,24 @@ function extractSubtitles(inputPath, outDir, subtitleStreams) {
     proc.on('close', () => resolve({ file: `sub_${i}.vtt`, language: s.tags?.language || 'und', title: s.tags?.title || `Subtitle ${i + 1}` }));
     proc.on('error', () => resolve(null));
   }))).then(list => list.filter(Boolean));
+}
+
+function buildMasterPlaylist(outDir, audioLangs) {
+  try {
+    let master = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
+    const numAudio = audioLangs.length || 1;
+    for (let i = 0; i < numAudio; i++) {
+      const label = audioLangs[i]?.title || audioLangs[i]?.language?.toUpperCase() || `Track ${i + 1}`;
+      const lang  = audioLangs[i]?.language || 'und';
+      const def   = i === 0 ? 'YES' : 'NO';
+      const uri   = i === 0 ? 'stream_0.m3u8' : `stream_${i}.m3u8`;
+      master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${label}",LANGUAGE="${lang}",DEFAULT=${def},AUTOSELECT=${def},URI="${uri}"\n`;
+    }
+    master += `\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,AUDIO="audio"\nstream_0.m3u8\n`;
+    fs.writeFileSync(path.join(outDir, 'master.m3u8'), master);
+  } catch (e) {
+    console.error('[Master Playlist] Failed to write:', e.message);
+  }
 }
 
 async function runConversionJob(jobId, inputPath) {
@@ -153,6 +137,7 @@ async function runConversionJob(jobId, inputPath) {
     const audioStreams = probe.streams.filter(s => s.codec_type === 'audio')
       .map(s => ({ index: s.index, language: s.tags?.language, title: s.tags?.title }));
     const subtitleStreams = probe.streams.filter(s => s.codec_type === 'subtitle' && s.codec_name !== 'hdmv_pgs_subtitle');
+    
     if (audioStreams.length === 0) throw new Error('No audio streams found in source file');
 
     jobs[jobId].status = 'extracting_subtitles';
@@ -161,29 +146,55 @@ async function runConversionJob(jobId, inputPath) {
     jobs[jobId].status = 'encoding';
     jobs[jobId].masterUrl = `/hls/${jobId}/master.m3u8`;
 
+    // 1. Write the master playlist right away so hls.js can parse all audio tracks
+    buildMasterPlaylist(outDir, audioStreams);
+
+    // 2. Spawn extra audio-only streams in parallel for tracks 1..N
+    for (let i = 1; i < audioStreams.length; i++) {
+      const aArgs = [
+        '-y', '-i', inputPath,
+        '-map', `0:${audioStreams[i].index}`, '-vn',
+        '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
+        '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+        '-hls_flags', 'append_list',
+        '-hls_segment_filename', path.join(outDir, `seg_${i}_%03d.ts`),
+        path.join(outDir, `stream_${i}.m3u8`)
+      ];
+      const aProc = spawn(ffmpegPath, aArgs);
+      aProc.stderr.on('data', () => {}); 
+    }
+
+    // 3. Main Pass: Video + Track 0 audio muxed together into stream_0.m3u8 (-c:v copy)
+    const mainArgs = [
+      '-y', '-i', inputPath,
+      '-map', '0:v:0', '-map', `0:${audioStreams[0].index}`,
+      '-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+      '-max_muxing_queue_size', '9999',
+      '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
+      '-hls_flags', 'append_list',
+      '-hls_segment_filename', path.join(outDir, 'seg_0_%03d.ts'),
+      path.join(outDir, 'stream_0.m3u8')
+    ];
+
     await new Promise((resolve, reject) => {
-      const proc = spawn(ffmpegPath, buildFfmpegArgs(inputPath, outDir, audioStreams));
-      
+      const proc = spawn(ffmpegPath, mainArgs);
       let stderrBuf = '';
-      const MAX_BUF = 20000;
       let isLiveSignaled = false;
 
-      // UPGRADE 3: The 30-Second Live Edge Watcher
-      // Automatically signals the frontend to start playing once 5 segments (30 sec) exist
+      // Watch output folder: trigger playback at 5 segments (30 sec buffer)
       const segWatcher = fs.watch(outDir, (event, filename) => {
         if (!isLiveSignaled && filename && filename.endsWith('.ts')) {
           const segs = fs.readdirSync(outDir).filter(f => f.endsWith('.ts')).length;
-          // Trigger playback at 5 segments
           if (segs >= 5) {
             isLiveSignaled = true;
-            jobs[jobId].status = 'done'; // Tricks the frontend into playing immediately
-            console.log(`[Live Stream] Job ${jobId} buffered 30 seconds. Playing now!`);
+            jobs[jobId].status = 'done'; // Signal frontend to play immediately
+            console.log(`[Live Stream] Job ${jobId} buffered 30s. Starting playback!`);
           }
         }
       });
 
       proc.stderr.on('data', d => {
-        stderrBuf = (stderrBuf + d.toString()).slice(-MAX_BUF);
+        stderrBuf = (stderrBuf + d.toString()).slice(-20000);
         const m = d.toString().match(/time=(\d+):(\d+):(\d+\.\d+)/);
         if (m) jobs[jobId].lastTimeMark = `${m[1]}:${m[2]}:${m[3]}`;
       });
@@ -194,20 +205,12 @@ async function runConversionJob(jobId, inputPath) {
       proc.on('close', (code, signal) => {
         clearTimeout(timeoutHandle);
         segWatcher.close();
-        
         if (code === 0) {
-          // If the video was very short and finished before hitting 5 segments, mark it done now
           if (!isLiveSignaled) jobs[jobId].status = 'done';
-          console.log(`[FFmpeg] Job ${jobId} finished completely.`);
           return resolve();
         }
-
-        const lines = stderrBuf.split('\n').map(l => l.trim()).filter(Boolean);
-        const errorLines = lines.filter(l => /error|invalid|failed|no such|could not|unsupported|unable to/i.test(l));
-        const relevant = (errorLines.length ? errorLines : lines.slice(-8)).slice(-8).join('\n');
-
-        if (!!signal || code > 128) return reject(new Error(`Conversion terminated (OOM Kill)`));
-        reject(new Error(`ffmpeg exited with code ${code}\n${relevant}`));
+        if (!!signal || code > 128) return reject(new Error('Conversion terminated (OOM Kill)'));
+        reject(new Error(`ffmpeg exited with code ${code}`));
       });
       proc.on('error', reject);
     });
@@ -259,7 +262,7 @@ app.get('/api/convert/status/:jobId', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Room state & Sockets
+// Room State & Socket Handling
 // ---------------------------------------------------------------------------
 const roomsData = {};
 
@@ -351,15 +354,6 @@ io.on('connection', (socket) => {
     if (!room || room.admin !== socket.id) return;
     room.autoplayNext = !!data.enabled;
     io.to(data.roomId).emit('autoplay-next-changed', room.autoplayNext);
-  });
-
-  socket.on('send-reaction', (data) => {
-    const room = roomsData[data.roomId];
-    if (!room) return;
-    const ALLOWED = ['❤️', '😂', '😮', '👏', '🔥', '👍'];
-    if (!ALLOWED.includes(data.emoji)) return;
-    const username = room.members[socket.id] || 'Guest';
-    io.to(data.roomId).emit('reaction', { emoji: data.emoji, user: username });
   });
 
   socket.on('add-to-queue', (data) => {
