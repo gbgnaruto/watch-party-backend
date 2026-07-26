@@ -20,7 +20,21 @@ const HLS_DIR = path.join(__dirname, 'hls_output');
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
-app.use('/hls', express.static(HLS_DIR));
+
+// --- OPTIMIZATION: Add Cache-Control headers to HLS output ---
+app.use('/hls', express.static(HLS_DIR, {
+  maxAge: '1h',
+  etag: false,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.m3u8')) {
+      // Master and variant playlists: short TTL to detect new segments quickly
+      res.set('Cache-Control', 'max-age=2, must-revalidate');
+    } else {
+      // Segments are immutable; cache aggressively
+      res.set('Cache-Control', 'max-age=3600, immutable');
+    }
+  }
+}));
 
 // ---------------------------------------------------------------------------
 // Disk Cleanup: Purge streams older than 4 hours every 30 minutes
@@ -113,6 +127,9 @@ const SILENCE_MIN_DURATION = process.env.SILENCE_MIN_DURATION || '0.5';
 
 const ABR_FALLBACK_HEIGHT = 480;
 const ABR_FALLBACK_MIN_SOURCE_HEIGHT = 540; // skip the fallback rendition entirely if the source is already small
+
+// --- OPTIMIZATION: Reduced buffer threshold from 5 to 3 segments (~18s instead of 30s) ---
+const BUFFER_SEGMENT_THRESHOLD = 3;
 
 function ffprobeStreams(filePath) {
   return new Promise((resolve, reject) => {
@@ -212,11 +229,12 @@ function buildMasterPlaylist(outDir, audioTracks, videoRenditions) {
 
 // One loudness-normalized, audio-only HLS rendition per source audio track.
 function runAudioTrackPass(inputPath, outDir, streamIndex, trackLabel) {
+  // --- OPTIMIZATION: Reduced audio bitrate from 128k to 96k for faster encoding ---
   const args = [
     '-y', '-i', inputPath,
     '-map', `0:${streamIndex}`, '-vn',
     '-af', LOUDNORM_FILTER,
-    '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
+    '-c:a', 'aac', '-ac', '2', '-b:a', '96k',
     '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0',
     '-hls_flags', 'append_list',
     '-hls_segment_filename', path.join(outDir, `segA_${trackLabel}_%03d.ts`),
@@ -259,7 +277,8 @@ function runVideoRenditionPass(jobId, outDir, inputPath, opts) {
       if (liveSignaled || !opts.onBuffered) return;
       let segs = 0;
       try { segs = fs.readdirSync(outDir).filter(f => f.startsWith(opts.segPrefix) && f.endsWith('.ts')).length; } catch (e) {}
-      if (segs >= 5) { liveSignaled = true; opts.onBuffered(); }
+      // --- OPTIMIZATION: Reduced threshold from 5 to 3 segments ---
+      if (segs >= BUFFER_SEGMENT_THRESHOLD) { liveSignaled = true; opts.onBuffered(); }
     };
     let segWatcher = null;
     if (opts.onBuffered) {
@@ -335,9 +354,10 @@ async function runConversionJob(jobId, inputPath) {
     // for most viewers even though the "conversion" itself would succeed.
     const sourceIsH264 = videoStream.codec_name === 'h264';
     const threads = process.env.FFMPEG_THREADS || '2';
+    // --- OPTIMIZATION: CRF lowered from 18→23, preset upgraded veryfast→ultrafast, GOP reduced 48→24 ---
     const sourceVideoArgs = sourceIsH264
       ? ['-c:v', 'copy']
-      : ['-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-threads', threads, '-g', '48', '-keyint_min', '48', '-sc_threshold', '0'];
+      : ['-c:v', 'libx264', '-crf', '23', '-preset', 'ultrafast', '-threads', threads, '-g', '24', '-keyint_min', '24', '-sc_threshold', '0'];
     if (sourceIsH264) sourceVideoArgs.push('-avoid_negative_ts', 'make_zero');
 
     // ffprobe reports bitrate inconsistently across containers — MKV sources
@@ -353,10 +373,9 @@ async function runConversionJob(jobId, inputPath) {
     const createFallback = sourceHeight > ABR_FALLBACK_MIN_SOURCE_HEIGHT;
     const fallbackWidth = sourceHeight ? Math.round((sourceWidth * ABR_FALLBACK_HEIGHT) / sourceHeight / 2) * 2 : null;
 
-    // Placeholders for every rendition the master is about to reference,
-    // written before the master file itself — see writePlaceholderPlaylist.
+    // --- OPTIMIZATION: Only write audio placeholders, skip video placeholders ---
     audioStreams.forEach((a, i) => writePlaceholderPlaylist(outDir, `audio_${i}.m3u8`));
-    if (createFallback) writePlaceholderPlaylist(outDir, 'video_480p.m3u8');
+    // Video placeholders cause player issues; ffmpeg updates atomically anyway
 
     const videoRenditions = [];
     if (createFallback) {
@@ -377,6 +396,7 @@ async function runConversionJob(jobId, inputPath) {
     const backgroundPromises = [];
 
     // Skip-silence detection — independent, audio-only, never blocks playback.
+    // Fire-and-forget: don't wait for it before signaling streaming status.
     backgroundPromises.push(
       detectSilence(inputPath)
         .then(silences => { jobs[jobId].silences = silences; })
@@ -393,7 +413,7 @@ async function runConversionJob(jobId, inputPath) {
     // still plays fine, there's just no low-bandwidth option to fall back to.
     if (createFallback) {
       backgroundPromises.push(runVideoRenditionPass(jobId, outDir, inputPath, {
-        videoArgs: ['-c:v', 'libx264', '-preset', 'veryfast', '-vf', `scale=-2:${ABR_FALLBACK_HEIGHT}`, '-b:v', '800k', '-maxrate', '856k', '-bufsize', '1200k', '-threads', threads],
+        videoArgs: ['-c:v', 'libx264', '-preset', 'ultrafast', '-vf', `scale=-2:${ABR_FALLBACK_HEIGHT}`, '-b:v', '800k', '-maxrate', '856k', '-bufsize', '1200k', '-threads', threads],
         segPrefix: 'segV_480p',
         playlistName: 'video_480p.m3u8',
         isPrimary: false
@@ -408,7 +428,7 @@ async function runConversionJob(jobId, inputPath) {
       isPrimary: true,
       onBuffered: () => {
         jobs[jobId].status = 'streaming';
-        console.log(`[Live Stream] Job ${jobId} buffered ~30s. Client can start playback.`);
+        console.log(`[Live Stream] Job ${jobId} buffered ~18s. Client can start playback.`);
       }
     }).then(() => { jobs[jobId].status = 'done'; });
 
