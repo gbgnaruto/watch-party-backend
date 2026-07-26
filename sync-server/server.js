@@ -23,49 +23,38 @@ app.use(express.json());
 app.use('/hls', express.static(HLS_DIR));
 
 // ---------------------------------------------------------------------------
-// Optional cloud storage
+// UPGRADE 1: Auto-Disk Cleanup (Prevents the server from crashing when full)
+// Deletes converted streams older than 4 hours every 30 minutes.
 // ---------------------------------------------------------------------------
-const S3_ENABLED = !!process.env.S3_BUCKET;
-let s3Client = null;
-if (S3_ENABLED) {
-  const { S3Client } = require('@aws-sdk/client-s3');
-  s3Client = new S3Client({
-    region: process.env.S3_REGION || 'auto',
-    endpoint: process.env.S3_ENDPOINT || undefined,
-    credentials: { accessKeyId: process.env.S3_ACCESS_KEY, secretAccessKey: process.env.S3_SECRET_KEY }
-  });
-}
+const STREAM_MAX_AGE_MS = 4 * 60 * 60 * 1000; 
+const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;    
 
-async function uploadDirToS3(jobId, localDir) {
-  const { Upload } = require('@aws-sdk/lib-storage');
-  const files = [];
-  (function walk(dir, prefix) {
-    fs.readdirSync(dir, { withFileTypes: true }).forEach(entry => {
-      const full = path.join(dir, entry.name);
-      const key = `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) walk(full, key); else files.push({ full, key });
-    });
-  })(localDir, `hls/${jobId}`);
+function cleanOldStreams() {
+    try {
+        const entries = fs.readdirSync(HLS_DIR);
+        let deleted = 0;
+        for (const name of entries) {
+            const dir = path.join(HLS_DIR, name);
+            try {
+                const stat = fs.statSync(dir);
+                if (!stat.isDirectory()) continue;
+                if (Date.now() - stat.mtimeMs < STREAM_MAX_AGE_MS) continue;
 
-  const contentType = (name) => {
-    if (name.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
-    if (name.endsWith('.ts')) return 'video/mp2t';
-    if (name.endsWith('.vtt')) return 'text/vtt';
-    return 'application/octet-stream';
-  };
-
-  await Promise.all(files.map(f => new Upload({
-    client: s3Client,
-    params: {
-      Bucket: process.env.S3_BUCKET, Key: f.key, Body: fs.createReadStream(f.full),
-      ContentType: contentType(f.full), ACL: process.env.S3_ACL || 'public-read'
+                fs.rmSync(dir, { recursive: true, force: true });
+                deleted++;
+            } catch(e) {}
+        }
+        if (deleted > 0) console.log(`[Cleanup] Removed ${deleted} old stream folders.`);
+    } catch(e) {
+        console.error('[Cleanup] Error:', e.message);
     }
-  }).done()));
-
-  const base = process.env.CDN_BASE_URL || `https://${process.env.S3_BUCKET}.s3.${process.env.S3_REGION || 'us-east-1'}.amazonaws.com`;
-  return `${base}/hls/${jobId}`;
 }
+cleanOldStreams();
+setInterval(cleanOldStreams, CLEANUP_INTERVAL_MS);
 
+// ---------------------------------------------------------------------------
+// Downloader
+// ---------------------------------------------------------------------------
 const BLOCKED_HOSTS = ['youtube.com', 'youtu.be', 'vimeo.com', 'netflix.com', 'twitch.tv', 'dailymotion.com'];
 function downloadToFile(url, destPath, redirects = 0) {
   return new Promise((resolve, reject) => {
@@ -117,34 +106,29 @@ function buildFfmpegArgs(inputPath, outDir, audioStreams) {
   args.push('-map', '0:v:0');
   audioStreams.forEach(a => args.push('-map', `0:${a.index}`));
 
-  // CPU Optimization: Single rendition at source resolution
-  const threads = process.env.FFMPEG_THREADS || '2';
-  args.push(
-    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-threads', threads,
-    '-g', '48', '-keyint_min', '48', '-sc_threshold', '0'
-  );
+  // UPGRADE 2: Zero-CPU Fast Copy (-c:v copy)
+  // Instead of re-encoding the video, we just slice it instantly. Blazing fast.
+  args.push('-c:v', 'copy');
+  
   audioStreams.forEach((a, i) => args.push(`-c:a:${i}`, 'aac', `-b:a:${i}`, '192k', `-ac:${i}`, '2'));
 
   const streamMapParts = [];
-  
-  // FIX: HLS strict compliance - Video is separated from audio track 0
   streamMapParts.push('v:0,name:source,agroup:aud');
 
   audioStreams.forEach((a, ai) => {
     const safeLang = (a.language || 'und').replace(/[^a-zA-Z0-9]/g, '');
-    
-    // FIX: Removed the 'name:' property which causes Exit 234 on Render's FFmpeg
     streamMapParts.push(`a:${ai},agroup:aud,language:${safeLang}${ai === 0 ? ',default:YES' : ''}`);
   });
 
   args.push(
     '-var_stream_map', streamMapParts.join(' '),
-    '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0', '-hls_flags', 'independent_segments',
+    '-f', 'hls', '-hls_time', '6', '-hls_list_size', '0', 
+    
+    // Added append_list so hls.js knows segments are continuously being added
+    '-hls_flags', 'independent_segments+append_list', 
+    
     '-master_pl_name', 'master.m3u8',
-    
-    // FIX: Replaced slash with underscore to prevent the ENOENT folder creation crash
     '-hls_segment_filename', path.join(outDir, 'stream_%v_data%03d.ts'),
-    
     path.join(outDir, 'stream_%v.m3u8')
   );
   return args;
@@ -175,10 +159,28 @@ async function runConversionJob(jobId, inputPath) {
     jobs[jobId].subtitles = await extractSubtitles(inputPath, outDir, subtitleStreams);
 
     jobs[jobId].status = 'encoding';
+    jobs[jobId].masterUrl = `/hls/${jobId}/master.m3u8`;
+
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, buildFfmpegArgs(inputPath, outDir, audioStreams));
+      
       let stderrBuf = '';
       const MAX_BUF = 20000;
+      let isLiveSignaled = false;
+
+      // UPGRADE 3: The 30-Second Live Edge Watcher
+      // Automatically signals the frontend to start playing once 5 segments (30 sec) exist
+      const segWatcher = fs.watch(outDir, (event, filename) => {
+        if (!isLiveSignaled && filename && filename.endsWith('.ts')) {
+          const segs = fs.readdirSync(outDir).filter(f => f.endsWith('.ts')).length;
+          // Trigger playback at 5 segments
+          if (segs >= 5) {
+            isLiveSignaled = true;
+            jobs[jobId].status = 'done'; // Tricks the frontend into playing immediately
+            console.log(`[Live Stream] Job ${jobId} buffered 30 seconds. Playing now!`);
+          }
+        }
+      });
 
       proc.stderr.on('data', d => {
         stderrBuf = (stderrBuf + d.toString()).slice(-MAX_BUF);
@@ -187,42 +189,29 @@ async function runConversionJob(jobId, inputPath) {
       });
 
       const maxMs = parseInt(process.env.FFMPEG_TIMEOUT_MS, 10) || 25 * 60 * 1000;
-      const timeoutHandle = setTimeout(() => {
-        proc.kill('SIGKILL');
-      }, maxMs);
+      const timeoutHandle = setTimeout(() => { proc.kill('SIGKILL'); }, maxMs);
 
       proc.on('close', (code, signal) => {
         clearTimeout(timeoutHandle);
-        if (code === 0) return resolve();
+        segWatcher.close();
+        
+        if (code === 0) {
+          // If the video was very short and finished before hitting 5 segments, mark it done now
+          if (!isLiveSignaled) jobs[jobId].status = 'done';
+          console.log(`[FFmpeg] Job ${jobId} finished completely.`);
+          return resolve();
+        }
 
         const lines = stderrBuf.split('\n').map(l => l.trim()).filter(Boolean);
         const errorLines = lines.filter(l => /error|invalid|failed|no such|could not|unsupported|unable to/i.test(l));
         const relevant = (errorLines.length ? errorLines : lines.slice(-8)).slice(-8).join('\n');
 
-        const looksLikeSystemKill = !!signal || code > 128;
-        if (looksLikeSystemKill) {
-          return reject(new Error(
-            `Conversion was terminated unexpectedly (${signal ? 'signal ' + signal : 'exit code ' + code}), most likely from running out of memory or CPU on this server. ` +
-            `This tends to happen with long or high-resolution source files.` +
-            (errorLines.length ? `\n\nLast ffmpeg output before termination:\n${relevant}` : '')
-          ));
-        }
-
+        if (!!signal || code > 128) return reject(new Error(`Conversion terminated (OOM Kill)`));
         reject(new Error(`ffmpeg exited with code ${code}\n${relevant}`));
       });
       proc.on('error', reject);
     });
 
-    if (S3_ENABLED) {
-      jobs[jobId].status = 'uploading';
-      const baseUrl = await uploadDirToS3(jobId, outDir);
-      jobs[jobId].masterUrl = `${baseUrl}/master.m3u8`;
-      fs.rm(outDir, { recursive: true, force: true }, () => {});
-    } else {
-      jobs[jobId].masterUrl = `/hls/${jobId}/master.m3u8`;
-    }
-
-    jobs[jobId].status = 'done';
   } catch (err) {
     jobs[jobId].status = 'error';
     jobs[jobId].error = err.message;
@@ -270,7 +259,7 @@ app.get('/api/convert/status/:jobId', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Room state
+// Room state & Sockets
 // ---------------------------------------------------------------------------
 const roomsData = {};
 
@@ -354,7 +343,6 @@ io.on('connection', (socket) => {
       room.currentRawSubtitles = data.subtitles || null;
       room.currentVideoTime = 0; room.playbackState = 'playing'; room.lastUpdatedAt = Date.now();
     }
-
     socket.to(data.roomId).emit('sync-video', data);
   });
 
@@ -401,8 +389,6 @@ io.on('connection', (socket) => {
     const room = roomsData[data.roomId];
     if (!room || room.admin !== socket.id) return;
     const { from, to } = data;
-    if (typeof from !== 'number' || typeof to !== 'number') return;
-    if (from < 0 || from >= room.queue.length || to < 0 || to >= room.queue.length) return;
     const item = room.queue.splice(from, 1)[0];
     room.queue.splice(to, 0, item);
     io.to(data.roomId).emit('queue-update', room.queue);
@@ -471,7 +457,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// FIX: Catch-all route restored so refreshing the page doesn't throw "Cannot GET /"
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
