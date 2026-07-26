@@ -454,7 +454,31 @@ input[type="text"].input-error { border-color: var(--danger); }
             </div>
             <button class="copy-btn" id="autoplayToggleBtn" onclick="toggleAutoplayNext()" style="display:none;"><span class="material-icons">sync_alt</span> Toggle</button>
         </div>
+        
+        <!-- NEW DIAGNOSTICS UI -->
+        <h3 style="margin-top: 16px;">Server Health Diagnostics</h3>
         <div class="setting-tile">
+            <div>
+                <div class="setting-label">Server Memory (RAM)</div>
+                <div class="setting-val" id="diagMemory" style="font-size: 12px; color: var(--text-dim);">Loading...</div>
+            </div>
+            <button class="copy-btn" onclick="fetchDiagnostics()" style="background: transparent; border-color: var(--panel-border); color: var(--text-dim);"><span class="material-icons">refresh</span></button>
+        </div>
+        <div class="setting-tile">
+            <div>
+                <div class="setting-label">Live Video Conversions</div>
+                <div class="setting-val" id="diagJobs" style="font-size: 12px; color: var(--text-dim);">Loading...</div>
+            </div>
+        </div>
+        <div class="setting-tile">
+            <div>
+                <div class="setting-label">Global Users Online</div>
+                <div class="setting-val" id="diagUsers" style="font-size: 12px; color: var(--text-dim);">Loading...</div>
+            </div>
+        </div>
+        <!-- END NEW DIAGNOSTICS UI -->
+
+        <div class="setting-tile" style="margin-top: 16px;">
             <div>
                 <div class="setting-label">Keyboard Shortcuts</div>
                 <div class="setting-val" style="font-size: 11px; color: var(--text-dim); line-height: 1.6;">Space play/pause · ←/→ seek · ↑/↓ volume · F fullscreen · M mute · L lock</div>
@@ -2139,6 +2163,47 @@ function renderVoiceParticipants() {
 
 function copyRoomId() {
     navigator.clipboard.writeText(roomId).then(() => toast('Room code copied: ' + roomId, 'success'));
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic Dashboard Integration
+// ---------------------------------------------------------------------------
+async function fetchDiagnostics() {
+    try {
+        const res = await fetch('/api/diagnostic');
+        if (!res.ok) throw new Error('Network response was not ok');
+        const data = await res.json();
+        
+        // Update Memory
+        const memEl = document.getElementById('diagMemory');
+        memEl.textContent = `${data.server.memory.rss} Used`;
+        memEl.style.color = 'var(--text)';
+        
+        // Update Jobs
+        const jobsEl = document.getElementById('diagJobs');
+        const activeJobs = (data.conversion_jobs.downloading || 0) + (data.conversion_jobs.encoding || 0);
+        jobsEl.textContent = `${activeJobs} Active | ${data.conversion_jobs.queued || 0} Queued`;
+        jobsEl.style.color = activeJobs > 0 ? 'var(--accent)' : 'var(--text)';
+        
+        // Update Global Users
+        const usersEl = document.getElementById('diagUsers');
+        usersEl.textContent = `${data.websockets.totalUsers} users across ${data.websockets.totalRooms} rooms`;
+        usersEl.style.color = 'var(--text)';
+        
+    } catch (err) {
+        document.getElementById('diagMemory').textContent = 'Server Unreachable';
+        document.getElementById('diagJobs').textContent = 'Server Unreachable';
+        document.getElementById('diagUsers').textContent = 'Server Unreachable';
+    }
+}
+
+// Intercept the switchTab function so diagnostics auto-refresh when opening Settings
+const originalSwitchTab = switchTab;
+switchTab = function(tabId, el) {
+    originalSwitchTab(tabId, el);
+    if (tabId === 'settings') {
+        fetchDiagnostics();
+    }
 }
 </script>
 </body>
